@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { uid, useTalos } from "@/lib/store";
 import { fetchContextSize, listModels } from "@/lib/llama";
 import { LlamaModel, Message } from "@/lib/types";
@@ -25,13 +25,11 @@ export default function ChatView({ conversationId }: { conversationId: string })
   const [models, setModels] = useState<LlamaModel[]>([]);
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [contextSize, setContextSize] = useState<number | null>(null);
-  const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [savedNotice, setSavedNotice] = useState<string[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // Fetch available models and the server context size.
   useEffect(() => {
@@ -55,17 +53,14 @@ export default function ChatView({ conversationId }: { conversationId: string })
   }, [endpoint, conversationId]);
 
   // Keep the latest message in view.
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [conversation?.messages]);
+  const scrollToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight });
+  }, []);
 
-  // Auto-grow the input to fit its content (capped by max-height in CSS).
   useEffect(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
-  }, [input]);
+    scrollToBottom();
+  }, [conversation?.messages, scrollToBottom]);
 
   if (!conversation) {
     return (
@@ -156,17 +151,16 @@ export default function ChatView({ conversationId }: { conversationId: string })
     }
   }
 
-  async function send() {
-    const text = input.trim();
-    if (!text || streaming) return;
+  async function send(text: string) {
+    const trimmed = text.trim();
+    if (!trimmed || streaming) return;
 
-    setInput("");
     setSavedNotice([]);
 
     const userMessage: Message = {
       id: uid("msg_"),
       role: "user",
-      content: text,
+      content: trimmed,
       createdAt: Date.now(),
     };
 
@@ -177,7 +171,7 @@ export default function ChatView({ conversationId }: { conversationId: string })
     if (before && before.messages.length === 0) {
       setConversationTitle(
         conversationId,
-        text.length > 42 ? text.slice(0, 42) + "…" : text
+        trimmed.length > 42 ? trimmed.slice(0, 42) + "…" : trimmed
       );
     }
 
@@ -240,11 +234,13 @@ export default function ChatView({ conversationId }: { conversationId: string })
               machine.
             </p>
           )}
-          {conversation.messages.map((m) => (
+          {conversation.messages.map((m, i) => (
             <MessageRow
               key={m.id}
               message={m}
-              streaming={streaming}
+              isStreaming={
+                streaming && i === conversation.messages.length - 1
+              }
               onDelete={() => deleteMessage(conversationId, m.id)}
               onResend={m.role === "user" ? () => resend(m.id) : undefined}
             />
@@ -271,68 +267,37 @@ export default function ChatView({ conversationId }: { conversationId: string })
       </div>
 
       {/* Input */}
-      <div className="px-5 pb-5 pt-1">
-        <div className="mx-auto flex max-w-4xl items-end gap-2 rounded-xl border border-ink-700 bg-ink-850 px-3 py-2 focus-within:border-bronze-600">
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                send();
-              }
-            }}
-            rows={1}
-            placeholder="Message the model… (Enter to send, Shift+Enter for a new line)"
-            className="max-h-72 min-h-[2.5rem] flex-1 resize-none bg-transparent px-1 py-2 text-sm leading-relaxed text-parchment-100 placeholder:text-parchment-600 focus:outline-none"
-          />
-          {streaming ? (
-            <button
-              onClick={stop}
-              className="mb-1 flex h-9 w-9 items-center justify-center rounded-lg bg-ink-700 text-parchment-100 transition-colors hover:bg-ink-800"
-              title="Stop generating"
-              aria-label="Stop generating"
-            >
-              <IconStop />
-            </button>
-          ) : (
-            <button
-              onClick={send}
-              disabled={!input.trim()}
-              className="mb-1 flex h-9 w-9 items-center justify-center rounded-lg bg-bronze-500 text-ink-950 transition-colors hover:bg-bronze-400 disabled:opacity-30"
-              title="Send"
-              aria-label="Send"
-            >
-              <IconSend />
-            </button>
-          )}
-        </div>
-      </div>
+      <ChatInput
+        streaming={streaming}
+        onSend={send}
+        onStop={stop}
+        onResize={scrollToBottom}
+      />
     </div>
   );
 }
 
-function MessageRow({
-  message,
-  streaming,
-  onDelete,
-  onResend,
-}: {
-  message: Message;
-  streaming: boolean;
-  onDelete: () => void;
-  onResend?: () => void;
-}) {
-  const isUser = message.role === "user";
-  const [copied, setCopied] = useState(false);
+const MessageRow = memo(
+  function MessageRow({
+    message,
+    isStreaming,
+    onDelete,
+    onResend,
+  }: {
+    message: Message;
+    isStreaming: boolean;
+    onDelete: () => void;
+    onResend?: () => void;
+  }) {
+    const isUser = message.role === "user";
+    const [copied, setCopied] = useState(false);
 
-  function copy() {
-    navigator.clipboard.writeText(message.content).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  }
+    function copy() {
+      navigator.clipboard.writeText(message.content).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      });
+    }
 
   return (
     <div
@@ -355,7 +320,7 @@ function MessageRow({
           <Markdown content={message.content} />
         ) : (
           <span className="text-sm text-parchment-600">
-            {streaming ? "▍" : "(empty response)"}
+            {isStreaming ? "▍" : "(empty response)"}
           </span>
         )}
       </div>
@@ -388,7 +353,7 @@ function MessageRow({
             <ActionButton
               label="Resend (regenerates everything after this message)"
               onClick={onResend}
-              disabled={streaming}
+              disabled={isStreaming}
             >
               <IconResend className="h-3.5 w-3.5" />
             </ActionButton>
@@ -400,7 +365,16 @@ function MessageRow({
       </div>
     </div>
   );
-}
+  },
+  // Re-render only when the message content/meta, streaming state, or whether
+  // it can resend actually change — ignore the always-fresh callback props.
+  // This keeps unchanged messages from re-rendering (and re-parsing markdown)
+  // while another message streams.
+  (prev, next) =>
+    prev.message === next.message &&
+    prev.isStreaming === next.isStreaming &&
+    !prev.onResend === !next.onResend
+);
 
 function MetaLine({ meta }: { meta: NonNullable<Message["meta"]> }) {
   const parts: string[] = [];
@@ -460,4 +434,88 @@ function formatTokens(n: number): string {
   if (n >= 10000) return `${(n / 1000).toFixed(0)}k`;
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
   return String(n);
+}
+
+/**
+ * Isolated input. Owns its own text state so keystrokes re-render only this
+ * component, never the message list (which is expensive to re-parse). Auto-
+ * grows to fit content and reports height changes via onResize so the parent
+ * can keep the latest message visible as the box grows.
+ */
+function ChatInput({
+  streaming,
+  onSend,
+  onStop,
+  onResize,
+}: {
+  streaming: boolean;
+  onSend: (text: string) => void;
+  onStop: () => void;
+  onResize: () => void;
+}) {
+  const [value, setValue] = useState("");
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const lastHeight = useRef(0);
+
+  // Grow to fit content (capped by max-height in CSS). When the rendered
+  // height actually changes, nudge the parent to re-pin the scroll position.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const next = el.scrollHeight;
+    el.style.height = `${next}px`;
+    if (next !== lastHeight.current) {
+      lastHeight.current = next;
+      onResize();
+    }
+  }, [value, onResize]);
+
+  function submit() {
+    const text = value.trim();
+    if (!text || streaming) return;
+    onSend(text);
+    setValue("");
+  }
+
+  return (
+    <div className="px-5 pb-5 pt-1">
+      <div className="mx-auto flex max-w-4xl items-end gap-2 rounded-xl border border-ink-700 bg-ink-850 px-3 py-2 focus-within:border-bronze-600">
+        <textarea
+          ref={ref}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+          rows={1}
+          placeholder="Message the model… (Enter to send, Shift+Enter for a new line)"
+          className="max-h-72 min-h-[2.5rem] flex-1 resize-none bg-transparent px-1 py-2 text-sm leading-relaxed text-parchment-100 placeholder:text-parchment-600 focus:outline-none"
+        />
+        {streaming ? (
+          <button
+            onClick={onStop}
+            className="mb-1 flex h-9 w-9 items-center justify-center rounded-lg bg-ink-700 text-parchment-100 transition-colors hover:bg-ink-800"
+            title="Stop generating"
+            aria-label="Stop generating"
+          >
+            <IconStop />
+          </button>
+        ) : (
+          <button
+            onClick={submit}
+            disabled={!value.trim()}
+            className="mb-1 flex h-9 w-9 items-center justify-center rounded-lg bg-bronze-500 text-ink-950 transition-colors hover:bg-bronze-400 disabled:opacity-30"
+            title="Send"
+            aria-label="Send"
+          >
+            <IconSend />
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }
