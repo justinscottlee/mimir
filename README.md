@@ -1,4 +1,4 @@
-# Talos
+# Mimir
 
 A self-hosted AI workbench for local llama.cpp endpoints. Named for the bronze
 automaton Hephaestus forged to guard Crete — the first machine in Greek myth
@@ -13,7 +13,7 @@ npm run dev
 
 Open http://localhost:3000, hit the gear in the sidebar footer, and point the
 endpoint at your llama.cpp server (e.g. `http://192.168.1.50:8080`). Use
-"Test connection" to confirm Talos can see your models.
+"Test connection" to confirm Mimir can see your models.
 
 ### Running llama.cpp with multiple models
 
@@ -25,7 +25,7 @@ llama-server --models-dir /path/to/ggufs --port 8080
 llama-server -m model.gguf --port 8080
 ```
 
-Talos reads `/v1/models` to populate the model picker and streams completions
+Mimir reads `/v1/models` to populate the model picker and streams completions
 from `/v1/chat/completions`.
 
 ## How it's wired
@@ -37,7 +37,7 @@ from `/v1/chat/completions`.
   survive a refresh without a database. Swap the persistence layer for SQLite
   later without touching components.
 - **llama.cpp access** goes through a catch-all proxy route
-  (`app/api/llama/[...path]/route.ts`). The browser only ever talks to Talos;
+  (`app/api/llama/[...path]/route.ts`). The browser only ever talks to Mimir;
   the Next server forwards to whatever endpoint you set, so CORS never comes
   up and the endpoint URL can be a LAN address.
 - **Streaming** is plain SSE parsing in `lib/llama.ts` with abort support
@@ -58,6 +58,9 @@ from `/v1/chat/completions`.
 
 - Assistant messages render markdown (GFM): bold, tables, lists, blockquotes,
   syntax-highlighted code blocks with per-block copy buttons.
+- Autoscroll sticks to the bottom only while you're already there; scroll up
+  during generation and it stops fighting you. A "jump to latest" pill (which
+  flags when a response is still generating) returns you to the bottom.
 - Long code blocks collapse (~320px) with a fade and an Expand button once
   generation finishes; while streaming they stay fully expanded so the
   control doesn't flicker as the code grows.
@@ -67,10 +70,13 @@ from `/v1/chat/completions`.
   estimates when the server doesn't report them.
 - Message actions on hover: copy and delete on every message; resend on user
   messages (truncates everything after and regenerates).
-- **Thinking.** `<think>…</think>` blocks from reasoning models render in a
-  collapsible accent panel showing how long the model thought. While
-  generating it stays expanded with a spinner and a live-ticking timer, then
-  auto-collapses to a "Thought · 4.2s" summary you can reopen.
+- **Thinking.** Reasoning renders in a collapsible accent panel showing how
+  long the model thought. While generating it stays expanded with a spinner
+  and a live-ticking timer, then auto-collapses to a "Thought · 4.2s" summary
+  you can reopen. Mimir reads both inline `<think>` tags and llama.cpp's
+  separate `reasoning_content` field (the default `auto`/`deepseek` reasoning
+  format), re-wrapping the latter as `<think>` so one parser handles both —
+  thinking shows up without special server flags.
 - **Inline tool events.** Tool calls (memory saves, skill loads) render as
   chips in the chat at the point they occurred — expandable for the tool's
   result — so the timeline reflects the real order of thinking, tools, and
@@ -89,7 +95,7 @@ model:
   result back to the model, and lets it continue its reply. The save appears
   as an inline chip in the chat at the point it happened. The model never
   writes storage
-  directly — it emits intent, Talos owns the mutation, every write is visible
+  directly — it emits intent, Mimir owns the mutation, every write is visible
   and reversible. Models without function-calling simply never call it and
   only the injection path runs (graceful degradation).
 
@@ -108,7 +114,7 @@ advertised to the model; `run(args)` executes and returns a string fed back
 as the result. Adding a capability — web search, file read/write — means
 adding one registry entry; the loop is tool-agnostic and unchanged. `remember`
 is the first entry (`rememberTool` in `lib/memory.ts`), wired to the store so
-the write stays owned by Talos.
+the write stays owned by Mimir.
 
 Manage them in the Memories window: add, edit (click the text), toggle
 on/off (checkbox), delete. `lib/memory.ts` is the single source for both the

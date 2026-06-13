@@ -1,5 +1,5 @@
 {
-  "name": "talos",
+  "name": "mimir",
   "version": "0.1.0",
   "private": true,
   "description": "Self-hosted AI workbench for local llama.cpp endpoints",

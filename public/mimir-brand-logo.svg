@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 144 144">
+  <g transform="translate(72, 72)">
+    <!-- spokes -->
+    <line x1="22.1" y1="-22.1" x2="62.2" y2="-62.2" stroke="#d99f54" stroke-width="2" />
+    <line x1="-22.1" y1="22.1" x2="-62.2" y2="62.2" stroke="#d99f54" stroke-width="2" />
+    <!-- outer diamond -->
+    <polygon points="62.2,-62.2 32.5,32.5 -62.2,62.2 -32.5,-32.5"
+             fill="none" stroke="#d99f54" stroke-width="4" stroke-linejoin="round"/>
+    <!-- inner folded gem -->
+    <polygon points="-38,-38 22.1,-22.1 38,38" fill="#e8b878"/>
+    <polygon points="-38,-38 38,38 -22.1,22.1" fill="#d99f54"/>
+    <line x1="-38" y1="-38" x2="38" y2="38" stroke="#c8853a" stroke-width="1"/>
+  </g>
+</svg>

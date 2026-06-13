@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useTalos } from "@/lib/store";
+import { useMimir } from "@/lib/store";
 import Sidebar from "./Sidebar";
 import TabBar from "./TabBar";
 import SearchOverlay from "./SearchOverlay";
@@ -16,9 +16,9 @@ export default function AppShell() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  const tabs = useTalos((s) => s.tabs);
-  const activeTabId = useTalos((s) => s.activeTabId);
-  const setSearchOpen = useTalos((s) => s.setSearchOpen);
+  const tabs = useMimir((s) => s.tabs);
+  const activeTabId = useMimir((s) => s.activeTabId);
+  const setSearchOpen = useMimir((s) => s.setSearchOpen);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -36,6 +36,12 @@ export default function AppShell() {
   }
 
   const active = tabs.find((t) => t.id === activeTabId) ?? null;
+
+  if (active) {
+    document.title = `${active.title} - Mimir`
+  } else {
+    document.title = `Mimir`
+  }
 
   return (
     <div className="relative flex h-screen overflow-hidden">

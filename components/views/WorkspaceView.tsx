@@ -1,9 +1,9 @@
 "use client";
 
-import { useTalos } from "@/lib/store";
+import { useMimir } from "@/lib/store";
 
 export default function WorkspaceView({ workspaceId }: { workspaceId: string }) {
-  const workspace = useTalos((s) => s.workspaces[workspaceId]);
+  const workspace = useMimir((s) => s.workspaces[workspaceId]);
 
   if (!workspace) {
     return (

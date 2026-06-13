@@ -3,7 +3,7 @@ import { LlamaModel, MessageMeta, Role } from "./types";
 /**
  * All requests go through /api/llama/* on the Next.js server, which forwards
  * them to the llama.cpp endpoint named in the `x-llama-base` header. This
- * sidesteps CORS entirely and keeps the browser talking only to Talos.
+ * sidesteps CORS entirely and keeps the browser talking only to Mimir.
  *
  * llama.cpp's server exposes an OpenAI-compatible API:
  *   GET  /v1/models            -> { data: [{ id }, ...] }
@@ -130,6 +130,12 @@ export async function streamChat(
   let buffer = "";
   let accumulated = "";
   let chunkCount = 0;
+  // Reasoning handling: llama.cpp's default reasoning_format puts thoughts in a
+  // separate `reasoning_content` field rather than inline <think> tags. We
+  // re-wrap that field as <think>…</think> so the transcript parser sees one
+  // uniform format regardless of server config. `reasoningOpen` tracks whether
+  // we've emitted an unclosed <think> that still needs a </think>.
+  let reasoningOpen = false;
   let usage: { prompt_tokens?: number; completion_tokens?: number } | undefined;
   let timings:
     | { prompt_n?: number; predicted_n?: number; predicted_per_second?: number }
@@ -155,8 +161,27 @@ export async function streamChat(
         try {
           const json = JSON.parse(payload);
           const choiceDelta = json.choices?.[0]?.delta;
+
+          // Separate reasoning field (deepseek/auto format). Wrap in <think>.
+          const reasoning =
+            choiceDelta?.reasoning_content ?? choiceDelta?.reasoning;
+          if (reasoning) {
+            if (!reasoningOpen) {
+              accumulated += "<think>";
+              reasoningOpen = true;
+            }
+            accumulated += reasoning;
+            chunkCount++;
+            onToken(accumulated);
+          }
+
           const delta = choiceDelta?.content;
           if (delta) {
+            // First content token after reasoning closes the think block.
+            if (reasoningOpen) {
+              accumulated += "</think>";
+              reasoningOpen = false;
+            }
             accumulated += delta;
             chunkCount++;
             onToken(accumulated);
@@ -164,6 +189,12 @@ export async function streamChat(
           // Tool-call fragments: { index, function: { name?, arguments? } }
           const tcs = choiceDelta?.tool_calls;
           if (Array.isArray(tcs)) {
+            // A tool call also ends any open reasoning block.
+            if (reasoningOpen) {
+              accumulated += "</think>";
+              reasoningOpen = false;
+              onToken(accumulated);
+            }
             for (const tc of tcs) {
               const idx = tc.index ?? 0;
               const entry = toolAcc.get(idx) ?? { name: "", arguments: "" };
@@ -181,6 +212,13 @@ export async function streamChat(
     }
   } finally {
     reader.releaseLock();
+  }
+
+  // Close a reasoning block that never saw following content (pure-thought
+  // response or abrupt end) so the parser always sees a balanced tag.
+  if (reasoningOpen) {
+    accumulated += "</think>";
+    onToken(accumulated);
   }
 
   const durationMs = performance.now() - started;

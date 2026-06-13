@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { uid, useTalos } from "@/lib/store";
+import { uid, useMimir } from "@/lib/store";
 import { fetchContextSize, listModels } from "@/lib/llama";
 import { LlamaModel, Message, ToolEventRecord } from "@/lib/types";
 import { buildMemoryPrompt, rememberTool } from "@/lib/memory";
@@ -21,18 +21,18 @@ import {
 import Markdown from "../Markdown";
 
 export default function ChatView({ conversationId }: { conversationId: string }) {
-  const conversation = useTalos((s) => s.conversations[conversationId]);
-  const endpoint = useTalos((s) => s.settings.endpoint);
-  const appendMessage = useTalos((s) => s.appendMessage);
-  const patchMessage = useTalos((s) => s.patchMessage);
-  const deleteMessage = useTalos((s) => s.deleteMessage);
-  const truncateAfterMessage = useTalos((s) => s.truncateAfterMessage);
-  const setConversationModel = useTalos((s) => s.setConversationModel);
-  const setConversationTitle = useTalos((s) => s.setConversationTitle);
-  const openWindow = useTalos((s) => s.openWindow);
-  const memories = useTalos((s) => s.memories);
-  const addMemory = useTalos((s) => s.addMemory);
-  const skills = useTalos((s) => s.skills);
+  const conversation = useMimir((s) => s.conversations[conversationId]);
+  const endpoint = useMimir((s) => s.settings.endpoint);
+  const appendMessage = useMimir((s) => s.appendMessage);
+  const patchMessage = useMimir((s) => s.patchMessage);
+  const deleteMessage = useMimir((s) => s.deleteMessage);
+  const truncateAfterMessage = useMimir((s) => s.truncateAfterMessage);
+  const setConversationModel = useMimir((s) => s.setConversationModel);
+  const setConversationTitle = useMimir((s) => s.setConversationTitle);
+  const openWindow = useMimir((s) => s.openWindow);
+  const memories = useMimir((s) => s.memories);
+  const addMemory = useMimir((s) => s.addMemory);
+  const skills = useMimir((s) => s.skills);
 
   const [models, setModels] = useState<LlamaModel[]>([]);
   const [modelsError, setModelsError] = useState<string | null>(null);
@@ -50,7 +50,7 @@ export default function ChatView({ conversationId }: { conversationId: string })
       .then((m) => {
         if (cancelled) return;
         setModels(m);
-        const current = useTalos.getState().conversations[conversationId];
+        const current = useMimir.getState().conversations[conversationId];
         if (m.length > 0 && !current?.model) {
           setConversationModel(conversationId, m[0].id);
         }
@@ -63,12 +63,30 @@ export default function ChatView({ conversationId }: { conversationId: string })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [endpoint, conversationId]);
 
-  // Keep the latest message in view.
-  const scrollToBottom = useCallback(() => {
+  // Autoscroll, but only when the user is already near the bottom. The moment
+  // they scroll up, we stop yanking them back down; when they return to the
+  // bottom, sticking resumes. `atBottom` drives the "jump to latest" button.
+  const [atBottom, setAtBottom] = useState(true);
+  const atBottomRef = useRef(true);
+
+  const handleScroll = useCallback(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTo({ top: el.scrollHeight });
+    if (!el) return;
+    // Within 80px of the bottom counts as "at bottom".
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    atBottomRef.current = near;
+    setAtBottom(near);
   }, []);
 
+  const scrollToBottom = useCallback((force = false) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (force || atBottomRef.current) {
+      el.scrollTo({ top: el.scrollHeight });
+    }
+  }, []);
+
+  // New tokens/messages: stick to bottom only if the user hasn't scrolled away.
   useEffect(() => {
     scrollToBottom();
   }, [conversation?.messages, scrollToBottom]);
@@ -83,7 +101,7 @@ export default function ChatView({ conversationId }: { conversationId: string })
 
   /** Streams a completion for the given history into a new assistant message. */
   async function runCompletion(history: Message[]) {
-    const current = useTalos.getState().conversations[conversationId];
+    const current = useMimir.getState().conversations[conversationId];
     if (!current?.model) {
       setStreamError("Pick a model first — none is selected.");
       return;
@@ -110,7 +128,7 @@ export default function ChatView({ conversationId }: { conversationId: string })
         [memoryPrompt, skillsPrompt].filter(Boolean).join("\n\n") || undefined;
 
       // Build the tool registry. The remember handler is wired to the store so
-      // Talos owns the write; the model only expresses intent. load_skill
+      // Mimir owns the write; the model only expresses intent. load_skill
       // returns a skill's full instructions on demand. New tools (web_search,
       // file ops, …) register here and the loop handles them unchanged.
       const registry: ToolRegistry = {
@@ -118,7 +136,7 @@ export default function ChatView({ conversationId }: { conversationId: string })
           addMemory(content, { category, source: "auto" });
         }),
         load_skill: loadSkillTool((name) => {
-          const match = Object.values(useTalos.getState().skills).find(
+          const match = Object.values(useMimir.getState().skills).find(
             (s) => s.name === name
           );
           return match ?? null;
@@ -165,7 +183,7 @@ export default function ChatView({ conversationId }: { conversationId: string })
         // survive reload.
         (event: ToolEvent) => {
           const existing =
-            useTalos.getState().conversations[conversationId]?.messages.find(
+            useMimir.getState().conversations[conversationId]?.messages.find(
               (m) => m.id === assistantMessage.id
             )?.toolEvents ?? [];
           patchMessage(conversationId, assistantMessage.id, {
@@ -212,7 +230,7 @@ export default function ChatView({ conversationId }: { conversationId: string })
       createdAt: Date.now(),
     };
 
-    const before = useTalos.getState().conversations[conversationId];
+    const before = useMimir.getState().conversations[conversationId];
     appendMessage(conversationId, userMessage);
 
     // First user message names the conversation.
@@ -228,9 +246,10 @@ export default function ChatView({ conversationId }: { conversationId: string })
 
   /** Drops everything after a user message and regenerates from it. */
   async function resend(messageId: string) {
+    console.log("test");
     if (streaming) return;
     truncateAfterMessage(conversationId, messageId);
-    const current = useTalos.getState().conversations[conversationId];
+    const current = useMimir.getState().conversations[conversationId];
     if (!current) return;
     await runCompletion(current.messages);
   }
@@ -274,31 +293,51 @@ export default function ChatView({ conversationId }: { conversationId: string })
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex max-w-4xl flex-col gap-6 px-5 py-6">
-          {conversation.messages.length === 0 && (
-            <p className="pt-16 text-center text-sm text-parchment-600">
-              Send a message to begin. The full conversation is kept on this
-              machine.
-            </p>
-          )}
-          {conversation.messages.map((m, i) => (
-            <MessageRow
-              key={m.id}
-              message={m}
-              isStreaming={
-                streaming && i === conversation.messages.length - 1
-              }
-              onDelete={() => deleteMessage(conversationId, m.id)}
-              onResend={m.role === "user" ? () => resend(m.id) : undefined}
-            />
-          ))}
-          {streamError && (
-            <div className="rounded-md border border-signal-err/40 bg-signal-err/10 px-3 py-2 text-sm text-signal-err">
-              {streamError}
-            </div>
-          )}
+      <div className="relative min-h-0 flex-1">
+        <div
+          ref={scrollRef}
+          onScroll={handleScroll}
+          className="h-full overflow-y-auto"
+        >
+          <div className="mx-auto flex max-w-4xl flex-col gap-6 px-5 py-6">
+            {conversation.messages.length === 0 && (
+              <p className="pt-16 text-center text-sm text-parchment-600">
+                Send a message to begin. No data will leave Mimir unless you use an externally hosted model, or web search.
+              </p>
+            )}
+            {conversation.messages.map((m, i) => (
+              <MessageRow
+                key={m.id}
+                message={m}
+                isStreaming={
+                  streaming && i === conversation.messages.length - 1
+                }
+                onDelete={() => deleteMessage(conversationId, m.id)}
+                onResend={m.role === "user" ? () => resend(m.id) : undefined}
+              />
+            ))}
+            {streamError && (
+              <div className="rounded-md border border-signal-err/40 bg-signal-err/10 px-3 py-2 text-sm text-signal-err">
+                {streamError}
+              </div>
+            )}
+          </div>
         </div>
+
+        {/* Jump to latest — appears when scrolled up, more prominent while
+            a response is still streaming below the fold. */}
+        {!atBottom && (
+          <button
+            onClick={() => scrollToBottom(true)}
+            className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-ink-700 bg-ink-850 px-3 py-1.5 text-xs text-parchment-100 shadow-lg transition-colors hover:bg-ink-800"
+          >
+            {streaming && (
+              <span className="h-1.5 w-1.5 rounded-full bg-bronze-400" />
+            )}
+            {streaming ? "Generating — jump to latest" : "Jump to latest"}
+            <IconChevron className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
 
       {/* Input */}
@@ -306,7 +345,7 @@ export default function ChatView({ conversationId }: { conversationId: string })
         streaming={streaming}
         onSend={send}
         onStop={stop}
-        onResize={scrollToBottom}
+        onResize={() => scrollToBottom()}
       />
     </div>
   );
@@ -428,8 +467,8 @@ function MetaLine({ meta }: { meta: NonNullable<Message["meta"]> }) {
     const used = meta.promptTokens + meta.completionTokens;
     parts.push(
       meta.contextSize
-        ? `ctx ${formatTokens(used)}/${formatTokens(meta.contextSize)}`
-        : `ctx ${formatTokens(used)}`
+        ? `${formatTokens(used)}/${formatTokens(meta.contextSize)} ctx`
+        : `${formatTokens(used)} ctx`
     );
   }
   if (meta.durationMs) {
@@ -649,7 +688,7 @@ function ThinkingPanel({
         className="flex w-full items-center gap-2 bg-bronze-600/15 px-3 py-1.5 text-left text-xs text-bronze-300 transition-colors hover:bg-bronze-600/25"
       >
         {live ? (
-          <IconSpark className="h-3.5 w-3.5 talos-spin text-bronze-400" />
+          <IconSpark className="h-3.5 w-3.5 mimir-spin text-bronze-400" />
         ) : (
           <IconSpark className="h-3.5 w-3.5 text-bronze-400" />
         )}
@@ -683,7 +722,7 @@ function ToolChip({ event }: { event?: ToolEventRecord }) {
     // Marker present but event not yet persisted (mid-stream) — show pending.
     return (
       <div className="inline-flex items-center gap-2 self-start rounded-md border border-ink-700 bg-ink-850 px-2.5 py-1 text-xs text-parchment-400">
-        <IconSpark className="h-3.5 w-3.5 talos-spin text-bronze-400" />
+        <IconSpark className="h-3.5 w-3.5 mimir-spin text-bronze-400" />
         running tool…
       </div>
     );

@@ -11,7 +11,7 @@ import { ToolHandler } from "./tools";
  *    the model decides a fact is worth keeping, it calls the tool instead of
  *    (or alongside) replying. We intercept the call, store the memory, and
  *    feed back a confirmation so the model can continue. The model is never
- *    writing to storage directly — it only emits an intent, and Talos owns
+ *    writing to storage directly — it only emits an intent, and Mimir owns
  *    the actual mutation. That keeps the user in control (every write is
  *    visible and reversible in the Memories window).
  *
@@ -34,12 +34,12 @@ export const MEMORY_TOOLS = [
           content: {
             type: "string",
             description:
-              "The fact as a standalone statement, e.g. 'The user runs llama.cpp on a machine named brutus at 192.168.1.50'.",
+              "The fact as a brief standalone statement, e.g. 'The user uses llama.cpp for running ai models.' or 'The user has a proxmox-based server named cuttlefish.'",
           },
           category: {
             type: "string",
             description:
-              "Optional short grouping label, e.g. 'preferences', 'hardware', 'projects'.",
+              "Optional short grouping label, e.g. 'preference', 'fact'.",
           },
         },
         required: ["content"],
@@ -92,7 +92,7 @@ export function parseRememberArgs(
 /**
  * Builds the `remember` registry entry. The handler is given a `save`
  * callback (wired to the store's addMemory in ChatView) so this module stays
- * free of store imports and the write stays owned by Talos, not the model.
+ * free of store imports and the write stays owned by Mimir, not the model.
  */
 export function rememberTool(
   save: (content: string, category?: string) => void

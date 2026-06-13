@@ -1,6 +1,6 @@
 "use client";
 
-import { useTalos } from "@/lib/store";
+import { useMimir } from "@/lib/store";
 import {
   IconBox,
   IconChat,
@@ -12,27 +12,34 @@ import {
   IconStack,
   IconTool,
 } from "./icons";
+import Image from "next/image"
 
 export default function Sidebar() {
-  const newConversation = useTalos((s) => s.newConversation);
-  const newWorkspace = useTalos((s) => s.newWorkspace);
-  const openWindow = useTalos((s) => s.openWindow);
-  const setSearchOpen = useTalos((s) => s.setSearchOpen);
-  const username = useTalos((s) => s.settings.username);
-  const windows = useTalos((s) => s.windows);
+  const newConversation = useMimir((s) => s.newConversation);
+  const newWorkspace = useMimir((s) => s.newWorkspace);
+  const openWindow = useMimir((s) => s.openWindow);
+  const setSearchOpen = useMimir((s) => s.setSearchOpen);
+  const username = useMimir((s) => s.settings.username);
+  const windows = useMimir((s) => s.windows);
 
   const isOpen = (kind: string) => windows.some((w) => w.kind === kind);
 
   return (
     <aside className="flex w-56 shrink-0 flex-col border-r border-ink-700 bg-ink-900">
       {/* Brand */}
-      <div className="flex items-center gap-2.5 px-4 pb-4 pt-5">
-        <span className="relative flex h-2.5 w-2.5">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-bronze-500 opacity-40" />
-          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-bronze-400" />
+      <div className="flex items-center gap-2.5 px-4 pb-4 pt-5 justify-center select-none">
+        <span className="w-10 h-10">
+          <img
+              src="/mimir-brand-logo.svg"
+              alt="brand logo"
+          />
         </span>
-        <span className="font-mono text-sm font-semibold tracking-[0.3em] text-parchment-100">
-          TALOS
+
+        <span className="w-24">
+          <img
+              src="/mimir-brand-text.svg"
+              alt={"mimir"}
+          />
         </span>
       </div>
 

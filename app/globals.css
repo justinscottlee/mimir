@@ -142,11 +142,11 @@ body {
 }
 
 /* Thinking indicator spinner */
-@keyframes talos-spin {
+@keyframes mimir-spin {
   to {
     transform: rotate(360deg);
   }
 }
-.talos-spin {
-  animation: talos-spin 1.4s linear infinite;
+.mimir-spin {
+  animation: mimir-spin 1.4s linear infinite;
 }

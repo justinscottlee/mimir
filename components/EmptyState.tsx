@@ -1,20 +1,22 @@
 "use client";
 
-import { useTalos } from "@/lib/store";
+import { useMimir } from "@/lib/store";
 
 export default function EmptyState() {
-  const newConversation = useTalos((s) => s.newConversation);
-  const newWorkspace = useTalos((s) => s.newWorkspace);
+  const newConversation = useMimir((s) => s.newConversation);
+  const newWorkspace = useMimir((s) => s.newWorkspace);
 
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-6">
-      <div className="text-center">
-        <div className="font-mono text-xs uppercase tracking-[0.35em] text-bronze-500">
-          Talos
+    <div className="flex h-full flex-col items-center justify-center gap-8">
+      <div className="text-center justify-items-center">
+        <div className="w-24">
+          <img
+              src="/mimir-brand-text.svg"
+              alt={"mimir"}
+          />
         </div>
-        <p className="mt-2 max-w-sm text-sm text-parchment-600">
-          The forge is lit. Start a conversation or open a workspace to put a
-          model to work.
+        <p className="mt-8 max-w-sm text-sm text-parchment-600">
+          Nothing is open. Start a new conversation or workspace; or open a previous one.
         </p>
       </div>
       <div className="flex gap-3">

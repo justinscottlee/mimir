@@ -1,14 +1,14 @@
 "use client";
 
-import { useTalos } from "@/lib/store";
+import { useMimir } from "@/lib/store";
 import { IconTrash } from "../icons";
 
 export default function ConversationsView() {
-  const conversations = useTalos((s) => s.conversations);
-  const openConversation = useTalos((s) => s.openConversation);
-  const deleteConversation = useTalos((s) => s.deleteConversation);
-  const newConversation = useTalos((s) => s.newConversation);
-  const closeWindowByKind = useTalos((s) => s.closeWindowByKind);
+  const conversations = useMimir((s) => s.conversations);
+  const openConversation = useMimir((s) => s.openConversation);
+  const deleteConversation = useMimir((s) => s.deleteConversation);
+  const newConversation = useMimir((s) => s.newConversation);
+  const closeWindowByKind = useMimir((s) => s.closeWindowByKind);
 
   const list = Object.values(conversations).sort(
     (a, b) => b.updatedAt - a.updatedAt

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useTalos } from "@/lib/store";
+import { useMimir } from "@/lib/store";
 import { FloatingWindow as Win, WindowKind } from "@/lib/types";
 import { IconClose } from "./icons";
 import ConversationsView from "./views/ConversationsView";
@@ -21,7 +21,7 @@ const WINDOW_TITLES: Record<WindowKind, string> = {
 };
 
 export function WindowLayer() {
-  const windows = useTalos((s) => s.windows);
+  const windows = useMimir((s) => s.windows);
   return (
     <div className="pointer-events-none absolute inset-0 z-30">
       {windows.map((w) => (
@@ -32,9 +32,9 @@ export function WindowLayer() {
 }
 
 function FloatingWindow({ win }: { win: Win }) {
-  const closeWindow = useTalos((s) => s.closeWindow);
-  const focusWindow = useTalos((s) => s.focusWindow);
-  const moveWindow = useTalos((s) => s.moveWindow);
+  const closeWindow = useMimir((s) => s.closeWindow);
+  const focusWindow = useMimir((s) => s.focusWindow);
+  const moveWindow = useMimir((s) => s.moveWindow);
 
   // Position lives in local state while dragging for smoothness; the final
   // position is committed to the store on pointer-up.

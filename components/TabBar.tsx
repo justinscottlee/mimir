@@ -1,16 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { useTalos } from "@/lib/store";
+import { useMimir } from "@/lib/store";
 import { IconClose } from "./icons";
 
 export default function TabBar() {
-  const tabs = useTalos((s) => s.tabs);
-  const activeTabId = useTalos((s) => s.activeTabId);
-  const setActiveTab = useTalos((s) => s.setActiveTab);
-  const closeTab = useTalos((s) => s.closeTab);
-  const moveTabBefore = useTalos((s) => s.moveTabBefore);
-  const renameTabRef = useTalos((s) => s.renameTabRef);
+  const tabs = useMimir((s) => s.tabs);
+  const activeTabId = useMimir((s) => s.activeTabId);
+  const setActiveTab = useMimir((s) => s.setActiveTab);
+  const closeTab = useMimir((s) => s.closeTab);
+  const moveTabBefore = useMimir((s) => s.moveTabBefore);
+  const renameTabRef = useMimir((s) => s.renameTabRef);
 
   const [dragId, setDragId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);

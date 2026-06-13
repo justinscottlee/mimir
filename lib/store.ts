@@ -33,7 +33,7 @@ const WINDOW_SIZES: Record<WindowKind, { w: number; h: number }> = {
   settings: { w: 660, h: 560 },
 };
 
-interface TalosState {
+interface MimirState {
   tabs: Tab[];
   activeTabId: string | null;
   windows: FloatingWindow[];
@@ -106,7 +106,7 @@ interface TalosState {
   setSearchOpen: (open: boolean) => void;
 }
 
-export const useTalos = create<TalosState>()(
+export const useMimir = create<MimirState>()(
   persist(
     (set, get) => ({
       tabs: [],
@@ -117,7 +117,7 @@ export const useTalos = create<TalosState>()(
       workspaces: {},
       memories: {},
       skills: {},
-      settings: { endpoint: "http://localhost:8080", username: "operator" },
+      settings: { endpoint: "http://localhost:8080", username: "admin" },
       searchOpen: false,
 
       // ---------- Tabs ----------
@@ -507,10 +507,10 @@ export const useTalos = create<TalosState>()(
       setSearchOpen: (open) => set({ searchOpen: open }),
     }),
     {
-      name: "talos-store",
+      name: "mimir-store",
       version: 2,
       migrate: (persisted: unknown, version) => {
-        const state = persisted as Partial<TalosState> & {
+        const state = persisted as Partial<MimirState> & {
           tabs?: { kind: string; refId?: string }[];
         };
         if (version < 2) {
@@ -529,7 +529,7 @@ export const useTalos = create<TalosState>()(
               (state.tabs[state.tabs.length - 1] as Tab | undefined)?.id ?? null;
           }
         }
-        return state as TalosState;
+        return state as MimirState;
       },
       partialize: (s) => ({
         tabs: s.tabs,

@@ -1,14 +1,14 @@
 "use client";
 
-import { useTalos } from "@/lib/store";
+import { useMimir } from "@/lib/store";
 import { IconTrash } from "../icons";
 
 export default function WorkspacesView() {
-  const workspaces = useTalos((s) => s.workspaces);
-  const openWorkspace = useTalos((s) => s.openWorkspace);
-  const deleteWorkspace = useTalos((s) => s.deleteWorkspace);
-  const newWorkspace = useTalos((s) => s.newWorkspace);
-  const closeWindowByKind = useTalos((s) => s.closeWindowByKind);
+  const workspaces = useMimir((s) => s.workspaces);
+  const openWorkspace = useMimir((s) => s.openWorkspace);
+  const deleteWorkspace = useMimir((s) => s.deleteWorkspace);
+  const newWorkspace = useMimir((s) => s.newWorkspace);
+  const closeWindowByKind = useMimir((s) => s.closeWindowByKind);
 
   const list = Object.values(workspaces).sort(
     (a, b) => b.createdAt - a.createdAt

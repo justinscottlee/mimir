@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useTalos } from "@/lib/store";
+import { useMimir } from "@/lib/store";
 import { IconBox, IconChat, IconSearch } from "./icons";
 
 interface Result {
@@ -12,12 +12,12 @@ interface Result {
 }
 
 export default function SearchOverlay() {
-  const open = useTalos((s) => s.searchOpen);
-  const setOpen = useTalos((s) => s.setSearchOpen);
-  const conversations = useTalos((s) => s.conversations);
-  const workspaces = useTalos((s) => s.workspaces);
-  const openConversation = useTalos((s) => s.openConversation);
-  const openWorkspace = useTalos((s) => s.openWorkspace);
+  const open = useMimir((s) => s.searchOpen);
+  const setOpen = useMimir((s) => s.setSearchOpen);
+  const conversations = useMimir((s) => s.conversations);
+  const workspaces = useMimir((s) => s.workspaces);
+  const openConversation = useMimir((s) => s.openConversation);
+  const openWorkspace = useMimir((s) => s.openWorkspace);
 
   const [query, setQuery] = useState("");
   const [highlight, setHighlight] = useState(0);

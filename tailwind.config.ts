@@ -8,7 +8,7 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Talos palette: gunmetal workshop + forged bronze
+        // Mimir palette: gunmetal workshop + forged bronze
         ink: {
           950: "#0d0f11", // app background
           900: "#121518", // panel background

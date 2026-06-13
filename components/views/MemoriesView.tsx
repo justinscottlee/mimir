@@ -1,16 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { useTalos } from "@/lib/store";
+import { useMimir } from "@/lib/store";
 import { Memory } from "@/lib/types";
 import { IconCheck, IconPlus, IconTrash } from "../icons";
 
 export default function MemoriesView() {
-  const memories = useTalos((s) => s.memories);
-  const addMemory = useTalos((s) => s.addMemory);
-  const updateMemory = useTalos((s) => s.updateMemory);
-  const deleteMemory = useTalos((s) => s.deleteMemory);
-  const toggleMemory = useTalos((s) => s.toggleMemory);
+  const memories = useMimir((s) => s.memories);
+  const addMemory = useMimir((s) => s.addMemory);
+  const updateMemory = useMimir((s) => s.updateMemory);
+  const deleteMemory = useMimir((s) => s.deleteMemory);
+  const toggleMemory = useMimir((s) => s.toggleMemory);
 
   const [draft, setDraft] = useState("");
   const [draftCategory, setDraftCategory] = useState("");

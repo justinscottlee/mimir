@@ -1,12 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { useTalos } from "@/lib/store";
+import { useMimir } from "@/lib/store";
 import { listModels } from "@/lib/llama";
 
 export default function SettingsView() {
-  const settings = useTalos((s) => s.settings);
-  const setSettings = useTalos((s) => s.setSettings);
+  const settings = useMimir((s) => s.settings);
+  const setSettings = useMimir((s) => s.setSettings);
 
   const [endpoint, setEndpoint] = useState(settings.endpoint);
   const [username, setUsername] = useState(settings.username);
@@ -43,6 +43,16 @@ export default function SettingsView() {
         <p className="mt-1 text-sm text-parchment-600">
           Base URL of a llama-server instance. Multi-model serving works if the
           server exposes more than one model on /v1/models.
+        </p>
+        <p className="mt-2 rounded-md border border-ink-700 bg-ink-900 px-3 py-2 text-xs leading-relaxed text-parchment-600">
+          Reasoning models: Mimir reads both inline{" "}
+          <span className="font-mono text-parchment-400">&lt;think&gt;</span>{" "}
+          tags and llama.cpp&apos;s separate{" "}
+          <span className="font-mono text-parchment-400">reasoning_content</span>{" "}
+          field, so the thinking panel works on the default server config. If
+          you never see thinking, your model may not be a reasoning model, or
+          reasoning may be disabled — try launching with{" "}
+          <span className="font-mono text-parchment-400">--reasoning-budget -1</span>.
         </p>
         <div className="mt-3 flex gap-2">
           <input

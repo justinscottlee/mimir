@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useTalos } from "@/lib/store";
+import { useMimir } from "@/lib/store";
 import { Skill } from "@/lib/types";
 import { parseSkillMarkdown } from "@/lib/skills";
 import { IconCheck, IconPlus, IconTrash } from "../icons";
@@ -12,9 +12,9 @@ type Mode =
   | { kind: "edit"; id: string };
 
 export default function SkillsView() {
-  const skills = useTalos((s) => s.skills);
-  const toggleSkill = useTalos((s) => s.toggleSkill);
-  const deleteSkill = useTalos((s) => s.deleteSkill);
+  const skills = useMimir((s) => s.skills);
+  const toggleSkill = useMimir((s) => s.toggleSkill);
+  const deleteSkill = useMimir((s) => s.deleteSkill);
 
   const [mode, setMode] = useState<Mode>({ kind: "list" });
 
@@ -142,7 +142,7 @@ function SkillRow({
 }
 
 function ImportSkill({ onDone }: { onDone: () => void }) {
-  const addSkill = useTalos((s) => s.addSkill);
+  const addSkill = useMimir((s) => s.addSkill);
   const [raw, setRaw] = useState(SAMPLE_SKILL);
 
   const parsed = parseSkillMarkdown(raw);
@@ -229,7 +229,7 @@ function ImportSkill({ onDone }: { onDone: () => void }) {
 }
 
 function EditSkill({ skill, onDone }: { skill: Skill; onDone: () => void }) {
-  const updateSkill = useTalos((s) => s.updateSkill);
+  const updateSkill = useMimir((s) => s.updateSkill);
   const [name, setName] = useState(skill.name);
   const [description, setDescription] = useState(skill.description);
   const [body, setBody] = useState(skill.body);
