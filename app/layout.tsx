@@ -7,6 +7,22 @@ export const metadata: Metadata = {
   icons: {
     icon: "/mimir-brand-logo.svg",
   },
+  openGraph: {
+    title: 'Mimir',
+    description: 'A privacy-first platform for self-managed large language models.',
+    url: 'https://mimir.justinlee.org',
+    siteName: 'Mimir',
+    images: [
+      {
+        url: 'https://mimir.justinlee.org/mimir-brand.png',
+        width: 937,
+        height: 355,
+        alt: 'Mimir branding',
+      },
+    ],
+    locale: 'en_US',
+    type: 'website',
+  },
 };
 
 export default function RootLayout({

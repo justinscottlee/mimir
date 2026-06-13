@@ -13,7 +13,6 @@ export default function ConfirmDelete({
   onConfirm,
   label = "Delete",
   message = "Delete permanently?",
-  size = "sm",
   className = "",
   stopPropagation = true,
 }: {
@@ -43,8 +42,6 @@ export default function ConfirmDelete({
     };
   }, [armed]);
 
-  const icon = size === "md" ? "h-4 w-4" : "h-3.5 w-3.5";
-
   function wrap(e: React.MouseEvent, fn: () => void) {
     if (stopPropagation) e.stopPropagation();
     fn();
@@ -66,7 +63,7 @@ export default function ConfirmDelete({
           title="Confirm delete — can't be undone"
           aria-label="Confirm delete"
         >
-          <IconCheck className={icon} />
+          <IconCheck className={"h-4 w-4"} />
         </button>
         <button
           onClick={(e) => wrap(e, () => setArmed(false))}
@@ -74,7 +71,7 @@ export default function ConfirmDelete({
           title="Cancel"
           aria-label="Cancel delete"
         >
-          <IconClose className={icon} />
+          <IconClose className={"h-4 w-4"} />
         </button>
       </div>
     );
@@ -90,7 +87,7 @@ export default function ConfirmDelete({
       title={label}
       aria-label={label}
     >
-      <IconTrash className={icon} />
+      <IconTrash className={"h-4 w-4"} />
     </button>
   );
 }

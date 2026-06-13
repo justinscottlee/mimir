@@ -130,9 +130,9 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
           title="Copy code"
         >
           {copied ? (
-            <IconCheck className="h-3.5 w-3.5 text-signal-ok" />
+            <IconCheck className="h-4 w-4 text-signal-ok" />
           ) : (
-            <IconCopy className="h-3.5 w-3.5" />
+            <IconCopy className="h-4 w-4" />
           )}
           {copied ? "copied" : "copy"}
         </button>

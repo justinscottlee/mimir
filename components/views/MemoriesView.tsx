@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useMimir } from "@/lib/store";
 import { Memory } from "@/lib/types";
-import { IconCheck, IconPlus } from "../icons";
+import {IconCheck, IconPlus, IconStop} from "../icons";
 import ConfirmDelete from "../ConfirmDelete";
 
 export default function MemoriesView() {
@@ -64,7 +64,7 @@ export default function MemoriesView() {
               disabled={!draft.trim()}
               className="flex items-center gap-1.5 rounded-md bg-bronze-500 px-3 py-1.5 text-sm font-medium text-ink-950 transition-colors hover:bg-bronze-400 disabled:opacity-30"
             >
-              <IconPlus className="h-3.5 w-3.5" />
+              <IconPlus className="h-4 w-4" />
               Add memory
             </button>
           </div>
@@ -176,7 +176,7 @@ function MemoryRow({
                 : "border-ink-700 text-transparent hover:border-parchment-600",
             ].join(" ")}
           >
-            <IconCheck className="h-3 w-3" />
+            <IconCheck className="h-4 w-4" />
           </button>
 
           <div className="min-w-0 flex-1">

@@ -176,7 +176,7 @@ export default function ConversationsView() {
                           : "border-ink-700",
                       ].join(" ")}
                     >
-                      {isSel && <IconCheck className="h-3 w-3" />}
+                      {isSel && <IconCheck className="h-4 w-4" />}
                     </span>
                   )}
                   <div className="min-w-0 flex-1">

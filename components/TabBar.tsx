@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMimir } from "@/lib/store";
 import { IconBox, IconChat, IconClose, IconPlus } from "./icons";
 
@@ -95,7 +96,7 @@ export default function TabBar() {
               className="rounded p-0.5 text-parchment-600 opacity-0 transition-opacity hover:bg-ink-700 hover:text-parchment-100 focus-visible:opacity-100 group-hover:opacity-100"
               aria-label={`Close ${tab.title}`}
             >
-              <IconClose className="h-3 w-3" />
+              <IconClose className="h-4 w-4" />
             </button>
           </div>
         );
@@ -112,29 +113,53 @@ function NewTabButton() {
   const newWorkspace = useMimir((s) => s.newWorkspace);
 
   const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
+  const [coords, setCoords] = useState<{ left: number; top: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Position the menu just below the button, in viewport coordinates. The menu
+  // is rendered in a portal (below) so it isn't clipped by the tab strip's
+  // horizontal overflow or trapped behind other stacking contexts.
+  useLayoutEffect(() => {
+    if (!open || !btnRef.current) return;
+    const r = btnRef.current.getBoundingClientRect();
+    setCoords({ left: r.left, top: r.bottom + 4 });
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
     function onDocClick(e: MouseEvent) {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
-        setOpen(false);
+      const t = e.target as Node;
+      if (
+        btnRef.current?.contains(t) ||
+        menuRef.current?.contains(t)
+      ) {
+        return;
       }
+      setOpen(false);
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") setOpen(false);
     }
+    function onScrollOrResize() {
+      setOpen(false);
+    }
     document.addEventListener("mousedown", onDocClick);
     document.addEventListener("keydown", onKey);
+    window.addEventListener("resize", onScrollOrResize);
+    window.addEventListener("scroll", onScrollOrResize, true);
     return () => {
       document.removeEventListener("mousedown", onDocClick);
       document.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", onScrollOrResize);
+      window.removeEventListener("scroll", onScrollOrResize, true);
     };
   }, [open]);
 
   return (
-    <div ref={wrapRef} className="relative mb-1 ml-0.5 shrink-0">
+    <div className="relative mb-1 ml-0.5 shrink-0">
       <button
+        ref={btnRef}
         onClick={() => setOpen((o) => !o)}
         aria-label="New tab"
         aria-haspopup="menu"
@@ -150,29 +175,35 @@ function NewTabButton() {
         <IconPlus className="h-4 w-4" />
       </button>
 
-      {open && (
-        <div
-          role="menu"
-          className="absolute left-0 top-9 z-50 w-52 overflow-hidden rounded-lg border border-ink-700 bg-ink-900 py-1 shadow-[0_12px_32px_rgba(0,0,0,0.5)]"
-        >
-          <MenuItem
-            icon={<IconChat className="h-4 w-4" />}
-            label="New conversation"
-            onClick={() => {
-              newConversation();
-              setOpen(false);
-            }}
-          />
-          <MenuItem
-            icon={<IconBox className="h-4 w-4" />}
-            label="New workspace"
-            onClick={() => {
-              newWorkspace();
-              setOpen(false);
-            }}
-          />
-        </div>
-      )}
+      {open &&
+        coords &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            style={{ position: "fixed", left: coords.left, top: coords.top }}
+            className="z-[100] w-52 overflow-hidden rounded-lg border border-ink-700 bg-ink-900 py-1 shadow-[0_12px_32px_rgba(0,0,0,0.5)]"
+          >
+            <MenuItem
+              icon={<IconChat className="h-4 w-4" />}
+              label="New conversation"
+              onClick={() => {
+                newConversation();
+                setOpen(false);
+              }}
+            />
+            <MenuItem
+              icon={<IconBox className="h-4 w-4" />}
+              label="New workspace"
+              onClick={() => {
+                newWorkspace();
+                setOpen(false);
+              }}
+            />
+          </div>,
+          document.body
+        )}
     </div>
   );
 }

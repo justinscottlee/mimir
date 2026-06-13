@@ -5,12 +5,11 @@ import {
   IconBox,
   IconChat,
   IconGear,
-  IconMemory,
+  IconClock,
   IconPlus,
   IconSearch,
-  IconSkill,
-  IconStack,
-  IconTool,
+  IconCode,
+  IconWrench, IconMemoryRibbon, IconMemoryScroll, IconBriefcase, IconUser
 } from "./icons";
 import Image from "next/image"
 
@@ -48,7 +47,6 @@ export default function Sidebar() {
         <SidebarButton
           label="New conversation"
           icon={<IconPlus />}
-          accent
           onClick={newConversation}
         />
         <SidebarButton
@@ -59,7 +57,7 @@ export default function Sidebar() {
         <SidebarButton
           label="Search"
           icon={<IconSearch />}
-          hint="⌘K"
+          hint="CTRL K"
           onClick={() => setSearchOpen(true)}
         />
       </div>
@@ -80,23 +78,23 @@ export default function Sidebar() {
         />
       </nav>
 
-      <SectionLabel>Forge</SectionLabel>
+      <SectionLabel>Tools</SectionLabel>
       <nav className="flex flex-col gap-1 px-2">
         <SidebarButton
           label="Memories"
-          icon={<IconMemory />}
+          icon={<IconBriefcase />}
           active={isOpen("memories")}
           onClick={() => openWindow("memories")}
         />
         <SidebarButton
           label="Skills"
-          icon={<IconSkill />}
+          icon={<IconCode />}
           active={isOpen("skills")}
           onClick={() => openWindow("skills")}
         />
         <SidebarButton
           label="Tools"
-          icon={<IconTool />}
+          icon={<IconWrench />}
           active={isOpen("tools")}
           onClick={() => openWindow("tools")}
         />
@@ -107,7 +105,7 @@ export default function Sidebar() {
       {/* Profile footer */}
       <div className="flex items-center gap-2 border-t border-ink-700 px-3 py-3">
         <div className="flex h-7 w-7 items-center justify-center rounded-full bg-bronze-600/30 font-mono text-xs uppercase text-bronze-300">
-          {username.slice(0, 1) || "?"}
+          <IconUser />
         </div>
         <span className="min-w-0 flex-1 truncate text-sm text-parchment-400">
           {username}

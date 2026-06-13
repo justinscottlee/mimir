@@ -156,7 +156,7 @@ function FloatingWindow({ win }: { win: Win }) {
           aria-label={`Close ${WINDOW_TITLES[win.kind]}`}
           title="Close"
         >
-          <IconClose className="h-3.5 w-3.5" />
+          <IconClose className="h-4 w-4" />
         </button>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -171,7 +171,7 @@ function FloatingWindow({ win }: { win: Win }) {
       >
         <svg
           viewBox="0 0 16 16"
-          className="absolute bottom-0.5 right-0.5 h-3 w-3 text-parchment-600"
+          className="absolute bottom-0.5 right-0.5 h-4 w-4 text-parchment-600"
           fill="none"
           stroke="currentColor"
           strokeWidth="1.2"

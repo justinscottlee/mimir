@@ -2,7 +2,6 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { uid, useMimir } from "@/lib/store";
-import { fetchContextSize } from "@/lib/llama";
 import {
   EndpointLoad,
   loadAllModels,
@@ -15,16 +14,7 @@ import { buildMemoryPrompt, rememberTool } from "@/lib/memory";
 import { buildSkillsPrompt, loadSkillTool } from "@/lib/skills";
 import { runToolLoop, ToolEvent, ToolRegistry } from "@/lib/tools";
 import { parseTranscript } from "@/lib/transcript";
-import {
-  IconCheck,
-  IconChevron,
-  IconCopy,
-  IconResend,
-  IconSend,
-  IconSpark,
-  IconStop,
-  IconTrash,
-} from "../icons";
+import * as Icons from "../icons";
 import ConfirmDelete from "../ConfirmDelete";
 import Markdown from "../Markdown";
 
@@ -42,7 +32,6 @@ export default function ChatView({ conversationId }: { conversationId: string })
 
   const [loads, setLoads] = useState<EndpointLoad[]>([]);
   const [loadingModels, setLoadingModels] = useState(true);
-  const [contextSize, setContextSize] = useState<number | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -94,9 +83,6 @@ export default function ChatView({ conversationId }: { conversationId: string })
     const resolved = resolveModelKey(conversation?.model, settings);
     if (!resolved) return;
     let cancelled = false;
-    fetchContextSize(resolved.url, resolved.apiKey).then(
-      (n) => !cancelled && setContextSize(n)
-    );
     return () => {
       cancelled = true;
     };
@@ -227,7 +213,6 @@ export default function ChatView({ conversationId }: { conversationId: string })
           content: result.content,
           meta: {
             ...result.meta,
-            contextSize: contextSize ?? undefined,
             thinkingMs: thinkingMs || undefined,
           },
         });
@@ -242,7 +227,6 @@ export default function ChatView({ conversationId }: { conversationId: string })
           patchMessage(conversationId, assistantMessage.id, {
             interrupted: true,
             meta: {
-              contextSize: contextSize ?? undefined,
               thinkingMs: thinkingMs || undefined,
             },
           });
@@ -251,7 +235,7 @@ export default function ChatView({ conversationId }: { conversationId: string })
         abortRef.current = null;
       }
     },
-    [conversationId, appendMessage, patchMessage, addMemory, contextSize]
+    [conversationId, appendMessage, patchMessage, addMemory]
   );
 
   const send = useCallback(
@@ -374,7 +358,7 @@ export default function ChatView({ conversationId }: { conversationId: string })
           >
             {streaming && <span className="h-1.5 w-1.5 rounded-full bg-bronze-400" />}
             {streaming ? "Generating — jump to latest" : "Jump to latest"}
-            <IconChevron className="h-3.5 w-3.5" />
+            <Icons.IconChevron className="h-4 w-4" />
           </button>
         )}
       </div>
@@ -437,9 +421,6 @@ function ModelSelect({
       {active && (
         <span className="hidden font-mono text-[10px] text-parchment-600 sm:inline">
           {groups.length > 1 ? active.endpointName : ""}
-          {active.contextLength
-            ? `${groups.length > 1 ? " · " : ""}${formatTokens(active.contextLength)} ctx`
-            : ""}
         </span>
       )}
     </div>
@@ -519,9 +500,9 @@ const MessageRow = memo(
           >
             <ActionButton label={copied ? "Copied" : "Copy message"} onClick={copy}>
               {copied ? (
-                <IconCheck className="h-3.5 w-3.5 text-signal-ok" />
+                <Icons.IconCheck className="h-4 w-4 text-signal-ok" />
               ) : (
-                <IconCopy className="h-3.5 w-3.5" />
+                <Icons.IconCopy className="h-4 w-4" />
               )}
             </ActionButton>
             {onResend && (
@@ -530,7 +511,7 @@ const MessageRow = memo(
                 onClick={() => onResend(message.id)}
                 disabled={isStreaming}
               >
-                <IconResend className="h-3.5 w-3.5" />
+                <Icons.IconRefresh className="h-4 w-4" />
               </ActionButton>
             )}
             <ConfirmDelete
@@ -554,11 +535,11 @@ function InterruptedTag({ standalone = false }: { standalone?: boolean }) {
   return (
     <div
       className={[
-        "flex items-center gap-1.5 text-[11px] text-parchment-600",
+        "flex items-center gap-1.5 text-xs text-parchment-600",
         standalone ? "" : "mt-2 border-t border-ink-700 pt-2",
       ].join(" ")}
     >
-      <IconStop className="h-3 w-3 text-signal-err" />
+      <Icons.IconStop className="h-4 w-4 text-signal-err" />
       <span className="italic">Generation interrupted</span>
     </div>
   );
@@ -577,11 +558,7 @@ function MetaLine({
   if (meta?.completionTokens) parts.push(`${formatTokens(meta.completionTokens)} out`);
   if (meta?.promptTokens != null && meta?.completionTokens != null) {
     const used = meta.promptTokens + meta.completionTokens;
-    parts.push(
-      meta.contextSize
-        ? `${formatTokens(used)}/${formatTokens(meta.contextSize)} ctx`
-        : `${formatTokens(used)} ctx`
-    );
+    parts.push(`${formatTokens(used)} ctx`);
   }
   if (meta?.durationMs) parts.push(`${(meta.durationMs / 1000).toFixed(1)}s`);
 
@@ -685,7 +662,7 @@ function ChatInput({
             title="Stop generating"
             aria-label="Stop generating"
           >
-            <IconStop />
+            <Icons.IconStop />
           </button>
         ) : (
           <button
@@ -695,7 +672,7 @@ function ChatInput({
             title="Send"
             aria-label="Send"
           >
-            <IconSend />
+            <Icons.IconSend />
           </button>
         )}
       </div>
@@ -776,14 +753,14 @@ function ThinkingPanel({
         onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center gap-2 bg-bronze-600/15 px-3 py-1.5 text-left text-xs text-bronze-300 transition-colors hover:bg-bronze-600/25"
       >
-        <IconSpark className={["h-3.5 w-3.5 text-bronze-400", live ? "mimir-spin" : ""].join(" ")} />
+        <Icons.IconSpark className={["h-4 w-4 text-bronze-400", live ? "mimir-spin" : ""].join(" ")} />
         <span className="font-medium">
           {live ? "Thinking" : "Thought"}
           {durationLabel ? ` · ${durationLabel}` : ""}
         </span>
         <div className="flex-1" />
-        <IconChevron
-          className={["h-3.5 w-3.5 transition-transform", open ? "" : "-rotate-90"].join(" ")}
+        <Icons.IconChevron
+          className={["h-4 w-4 transition-transform", open ? "" : "-rotate-90"].join(" ")}
         />
       </button>
       {open && (
@@ -806,7 +783,7 @@ function ToolChip({ event }: { event?: ToolEventRecord }) {
   if (!event) {
     return (
       <div className="inline-flex items-center gap-2 self-start rounded-md border border-ink-700 bg-ink-850 px-2.5 py-1 text-xs text-parchment-400">
-        <IconSpark className="h-3.5 w-3.5 mimir-spin text-bronze-400" />
+        <Icons.IconSpark className="h-4 w-4 mimir-spin text-bronze-400" />
         running tool…
       </div>
     );
@@ -831,8 +808,8 @@ function ToolChip({ event }: { event?: ToolEventRecord }) {
         <span className="h-1.5 w-1.5 rounded-full bg-bronze-400" />
         <span className="font-mono text-bronze-300">{event.name}</span>
         <span className="text-parchment-600">{label}</span>
-        <IconChevron
-          className={["h-3 w-3 transition-transform", open ? "" : "-rotate-90"].join(" ")}
+        <Icons.IconChevron
+          className={["h-4 w-4 transition-transform", open ? "" : "-rotate-90"].join(" ")}
         />
       </button>
       {open && (
@@ -884,7 +861,7 @@ function ConfirmDeleteInline({
           className="rounded px-1 hover:bg-signal-err/20"
           title="Confirm — can't be undone"
         >
-          <IconCheck className="h-3.5 w-3.5" />
+          <Icons.IconCheck className="h-4 w-4" />
         </button>
         <button
           onClick={() => setArmed(false)}
@@ -900,7 +877,7 @@ function ConfirmDeleteInline({
       onClick={() => setArmed(true)}
       className="flex items-center gap-1 rounded text-[11px] text-parchment-400 hover:text-signal-err"
     >
-      <IconTrash className="h-3.5 w-3.5" />
+      <Icons.IconTrash className="h-4 w-4" />
       Delete memory
     </button>
   );

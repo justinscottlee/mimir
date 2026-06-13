@@ -8,7 +8,6 @@ import { LlamaModel, MessageMeta, Role } from "./types";
  * llama.cpp's server exposes an OpenAI-compatible API:
  *   GET  /v1/models            -> { data: [{ id }, ...] }
  *   POST /v1/chat/completions  -> SSE stream when stream: true
- *   GET  /props                -> server properties incl. n_ctx (llama.cpp only)
  */
 
 function headers(endpoint: string, apiKey?: string): HeadersInit {
@@ -40,35 +39,12 @@ export async function listModels(
   return (json.data ?? []).map(
     (m: {
       id: string;
-      meta?: { n_ctx_train?: number; n_ctx?: number };
       owned_by?: string;
     }) => ({
       id: m.id,
-      contextLength: m.meta?.n_ctx_train ?? m.meta?.n_ctx,
       ownedBy: m.owned_by,
     })
   );
-}
-
-/** Reads the server context size from llama.cpp's /props, if available. */
-export async function fetchContextSize(
-  endpoint: string,
-  apiKey?: string
-): Promise<number | null> {
-  try {
-    const res = await fetch("/api/llama/props", {
-      headers: headers(endpoint, apiKey),
-    });
-    if (!res.ok) return null;
-    const json = await res.json();
-    return (
-      json?.default_generation_settings?.n_ctx ??
-      json?.n_ctx ??
-      null
-    );
-  } catch {
-    return null;
-  }
 }
 
 export interface ToolDef {

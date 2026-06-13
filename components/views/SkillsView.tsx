@@ -49,7 +49,7 @@ export default function SkillsView() {
           onClick={() => setMode({ kind: "import" })}
           className="flex shrink-0 items-center gap-1.5 rounded-md bg-bronze-500 px-3 py-1.5 text-sm font-medium text-ink-950 transition-colors hover:bg-bronze-400"
         >
-          <IconPlus className="h-3.5 w-3.5" />
+          <IconPlus className="h-4 w-4" />
           Add skill
         </button>
       </div>
@@ -106,7 +106,7 @@ function SkillRow({
               : "border-ink-700 text-transparent hover:border-parchment-600",
           ].join(" ")}
         >
-          <IconCheck className="h-3 w-3" />
+          <IconCheck className="h-4 w-4" />
         </button>
 
         <div

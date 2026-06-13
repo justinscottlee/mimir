@@ -48,8 +48,6 @@ export interface MessageMeta {
   durationMs?: number;
   /** Total time the model spent inside <think> blocks, in ms. */
   thinkingMs?: number;
-  /** Server context window size (n_ctx) at the time of generation. */
-  contextSize?: number;
 }
 
 export interface Message {

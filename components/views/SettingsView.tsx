@@ -182,11 +182,6 @@ function ModelsSection() {
                       <span className="min-w-0 flex-1 truncate font-mono text-xs text-parchment-100">
                         {m.id}
                       </span>
-                      {m.contextLength && (
-                        <span className="font-mono text-[10px] text-parchment-600">
-                          {formatK(m.contextLength)} ctx
-                        </span>
-                      )}
                     </li>
                   );
                 })}
@@ -235,9 +230,9 @@ const PRESETS: {
     url: "https://api.anthropic.com/v1",
     needsKey: true,
     manualModels: [
-      "claude-opus-4-6",
+      "claude-opus-4-8",
       "claude-sonnet-4-6",
-      "claude-haiku-4-5-20251001",
+      "claude-haiku-4-5",
     ],
   },
   { label: "OpenAI", name: "OpenAI", url: "https://api.openai.com/v1", needsKey: true },
@@ -351,7 +346,7 @@ function EndpointCard({
               .filter(Boolean);
             onChange({ manualModels: lines.length ? lines : undefined });
           }}
-          placeholder={"claude-opus-4-6\nclaude-sonnet-4-6"}
+          placeholder={"claude-opus-4-8\nclaude-sonnet-4-6"}
           rows={2}
           spellCheck={false}
           className="mt-1 w-full resize-none rounded-md border border-ink-700 bg-ink-850 px-2.5 py-1.5 font-mono text-xs text-parchment-100 placeholder:text-parchment-600/60 focus:border-bronze-600 focus:outline-none"
@@ -474,7 +469,7 @@ function AddEndpoint({
           disabled={!url.trim()}
           className="flex items-center gap-1.5 rounded-md bg-bronze-500 px-3 py-1.5 text-sm font-medium text-ink-950 transition-colors hover:bg-bronze-400 disabled:opacity-30"
         >
-          <IconPlus className="h-3.5 w-3.5" />
+          <IconPlus className="h-4 w-4" />
           Add
         </button>
       </div>
