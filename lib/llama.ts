@@ -22,8 +22,14 @@ function headers(endpoint: string, apiKey?: string): HeadersInit {
 
 export async function listModels(
   endpoint: string,
-  apiKey?: string
+  apiKey?: string,
+  manualModels?: string[]
 ): Promise<LlamaModel[]> {
+  // Some providers (Anthropic) don't expose /v1/models — use the manually
+  // configured list instead and skip the network call.
+  if (manualModels && manualModels.length > 0) {
+    return manualModels.map((id) => ({ id }));
+  }
   const res = await fetch("/api/llama/v1/models", {
     headers: headers(endpoint, apiKey),
   });

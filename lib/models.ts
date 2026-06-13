@@ -19,7 +19,11 @@ export async function loadAllModels(
   return Promise.all(
     endpoints.map(async (endpoint) => {
       try {
-        const models = await listModels(endpoint.url, endpoint.apiKey);
+        const models = await listModels(
+          endpoint.url,
+          endpoint.apiKey,
+          endpoint.manualModels
+        );
         return { endpoint, models };
       } catch (e) {
         return { endpoint, models: [], error: (e as Error).message };
@@ -52,11 +56,16 @@ export function resolveEnabledModels(
   return out;
 }
 
-/** Resolves a model key to the endpoint URL + model id needed for a request. */
+/** Resolves a model key to everything needed to make a request. */
 export function resolveModelKey(
   key: string | undefined,
   settings: Settings
-): { url: string; apiKey?: string; modelId: string; endpointName: string } | null {
+): {
+  url: string;
+  apiKey?: string;
+  modelId: string;
+  endpointName: string;
+} | null {
   if (!key) return null;
   const ref = parseModelKey(key);
   if (!ref) return null;

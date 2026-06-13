@@ -12,14 +12,21 @@ async function proxy(req: NextRequest, path: string[]) {
   const base = req.headers.get("x-llama-base");
   if (!base) {
     return Response.json(
-      { error: "No llama.cpp endpoint configured. Set one in Settings." },
+      { error: "No endpoint configured. Set one in Settings." },
       { status: 400 }
     );
   }
 
   let target: URL;
   try {
-    target = new URL(path.join("/") + req.nextUrl.search, ensureSlash(base));
+    // Hosted APIs (Groq, OpenAI, …) include /v1 in their base URL, but all
+    // internal fetch calls go through /api/llama/v1/... — strip the leading
+    // v1 segment when the base already ends with it to avoid /v1/v1/models.
+    const basePath = new URL(ensureSlash(base)).pathname.replace(/\/+$/, "");
+    const segments =
+      basePath.endsWith("/v1") && path[0] === "v1" ? path.slice(1) : path;
+
+    target = new URL(segments.join("/") + req.nextUrl.search, ensureSlash(base));
   } catch {
     return Response.json(
       { error: `"${base}" is not a valid URL.` },
@@ -27,8 +34,9 @@ async function proxy(req: NextRequest, path: string[]) {
     );
   }
 
-  // Hosted APIs (Groq, OpenAI, …) need a bearer token; local llama.cpp doesn't.
-  // The key rides in a separate header so it never lands in a URL or a log.
+  // Hosted APIs (Groq, OpenAI, Anthropic, …) need a bearer token; local
+  // llama.cpp doesn't. The key rides in a separate header so it never lands
+  // in a URL or a log.
   const apiKey = req.headers.get("x-llama-key");
   const outHeaders: Record<string, string> = {
     "Content-Type": "application/json",

@@ -9,6 +9,7 @@ import {
 } from "@/lib/models";
 import { modelKey } from "@/lib/types";
 import ConfirmDelete from "../ConfirmDelete";
+import type { Endpoint } from "@/lib/types";
 import { IconPlus } from "../icons";
 
 type Section = "models" | "system" | "account";
@@ -102,6 +103,7 @@ function ModelsSection() {
               name={ep.name}
               url={ep.url}
               apiKey={ep.apiKey}
+              manualModels={ep.manualModels}
               status={
                 loading
                   ? "loading"
@@ -116,7 +118,11 @@ function ModelsSection() {
             />
           );
         })}
-        <AddEndpoint onAdd={(name, url, apiKey) => addEndpoint(name, url, apiKey)} />
+        <AddEndpoint
+          onAdd={(name, url, apiKey, manualModels) =>
+            addEndpoint(name, url, apiKey, manualModels)
+          }
+        />
       </div>
 
       <div className="mt-8 flex items-center justify-between">
@@ -214,9 +220,26 @@ function ModelsSection() {
 }
 
 /** OpenAI-compatible providers, for one-tap prefill in the add row. */
-const PRESETS: { label: string; name: string; url: string; needsKey: boolean }[] = [
+const PRESETS: {
+  label: string;
+  name: string;
+  url: string;
+  needsKey: boolean;
+  manualModels?: string[];
+}[] = [
   { label: "llama.cpp", name: "Local", url: "http://localhost:8080", needsKey: false },
   { label: "Groq", name: "Groq", url: "https://api.groq.com/openai/v1", needsKey: true },
+  {
+    label: "Anthropic",
+    name: "Anthropic",
+    url: "https://api.anthropic.com/v1",
+    needsKey: true,
+    manualModels: [
+      "claude-opus-4-6",
+      "claude-sonnet-4-6",
+      "claude-haiku-4-5-20251001",
+    ],
+  },
   { label: "OpenAI", name: "OpenAI", url: "https://api.openai.com/v1", needsKey: true },
   { label: "OpenRouter", name: "OpenRouter", url: "https://openrouter.ai/api/v1", needsKey: true },
   { label: "Together", name: "Together", url: "https://api.together.xyz/v1", needsKey: true },
@@ -261,6 +284,7 @@ function EndpointCard({
   name,
   url,
   apiKey,
+  manualModels,
   status,
   error,
   onChange,
@@ -271,12 +295,15 @@ function EndpointCard({
   name: string;
   url: string;
   apiKey?: string;
+  manualModels?: string[];
   status: string;
   error: boolean;
-  onChange: (patch: { name?: string; url?: string; apiKey?: string }) => void;
+  onChange: (patch: Partial<Endpoint>) => void;
   onRemove: () => void;
   canRemove: boolean;
 }) {
+  const manualText = (manualModels ?? []).join("\n");
+
   return (
     <div className="rounded-lg border border-ink-700 bg-ink-900 p-3">
       <div className="flex items-center gap-2">
@@ -302,15 +329,38 @@ function EndpointCard({
           />
         )}
       </div>
+
       <div className="mt-2 flex items-center gap-2">
         <KeyField
           value={apiKey ?? ""}
-          onChange={(v) => onChange({ apiKey: v })}
+          onChange={(v) => onChange({ apiKey: v || undefined })}
         />
       </div>
+
+      <div className="mt-2">
+        <label className="block text-[11px] text-parchment-600">
+          Manual model list{" "}
+          <span className="text-parchment-600/60">(one per line — required for Anthropic)</span>
+        </label>
+        <textarea
+          value={manualText}
+          onChange={(e) => {
+            const lines = e.target.value
+              .split("\n")
+              .map((l) => l.trim())
+              .filter(Boolean);
+            onChange({ manualModels: lines.length ? lines : undefined });
+          }}
+          placeholder={"claude-opus-4-6\nclaude-sonnet-4-6"}
+          rows={2}
+          spellCheck={false}
+          className="mt-1 w-full resize-none rounded-md border border-ink-700 bg-ink-850 px-2.5 py-1.5 font-mono text-xs text-parchment-100 placeholder:text-parchment-600/60 focus:border-bronze-600 focus:outline-none"
+        />
+      </div>
+
       <div
         className={[
-          "mt-2 flex items-center gap-2 font-mono text-[11px]",
+          "mt-2 flex flex-wrap items-center gap-2 font-mono text-[11px]",
           error ? "text-signal-err" : "text-parchment-600",
         ].join(" ")}
       >
@@ -319,6 +369,11 @@ function EndpointCard({
             API · keyed
           </span>
         )}
+        {manualModels?.length ? (
+          <span className="rounded bg-ink-800 px-1.5 py-0.5 text-[10px] text-parchment-400">
+            {manualModels.length} manual model{manualModels.length === 1 ? "" : "s"}
+          </span>
+        ) : null}
         <span>{status}</span>
       </div>
     </div>
@@ -328,24 +383,38 @@ function EndpointCard({
 function AddEndpoint({
   onAdd,
 }: {
-  onAdd: (name: string, url: string, apiKey?: string) => void;
+  onAdd: (
+    name: string,
+    url: string,
+    apiKey?: string,
+    manualModels?: string[]
+  ) => void;
 }) {
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [manualText, setManualText] = useState("");
 
   function applyPreset(p: (typeof PRESETS)[number]) {
     setName(p.name);
     setUrl(p.url);
     if (!p.needsKey) setApiKey("");
+    setManualText((p.manualModels ?? []).join("\n"));
   }
 
   function add() {
     if (!url.trim()) return;
-    onAdd(name.trim() || "Endpoint", url.trim(), apiKey.trim() || undefined);
-    setName("");
-    setUrl("");
-    setApiKey("");
+    const manualModels = manualText
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
+    onAdd(
+      name.trim() || "Endpoint",
+      url.trim(),
+      apiKey.trim() || undefined,
+      manualModels.length ? manualModels : undefined
+    );
+    setName(""); setUrl(""); setApiKey(""); setManualText("");
   }
 
   return (
@@ -375,7 +444,7 @@ function AddEndpoint({
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && add()}
-          placeholder="http://192.168.1.50:8080 or https://api.groq.com/openai/v1"
+          placeholder="http://localhost:8080 or https://api.groq.com/openai/v1"
           spellCheck={false}
           className="flex-1 rounded-md border border-ink-700 bg-ink-850 px-2.5 py-1.5 font-mono text-xs text-parchment-100 placeholder:text-parchment-600 focus:border-bronze-600 focus:outline-none"
         />
@@ -383,6 +452,23 @@ function AddEndpoint({
 
       <div className="mt-2 flex items-center gap-2">
         <KeyField value={apiKey} onChange={setApiKey} />
+      </div>
+
+      <div className="mt-2">
+        <label className="block text-[11px] text-parchment-600">
+          Manual model list <span className="text-parchment-600/60">(one per line — required for Anthropic)</span>
+        </label>
+        <textarea
+          value={manualText}
+          onChange={(e) => setManualText(e.target.value)}
+          placeholder={"claude-opus-4-6\nclaude-sonnet-4-6"}
+          rows={2}
+          spellCheck={false}
+          className="mt-1 w-full resize-none rounded-md border border-ink-700 bg-ink-850 px-2.5 py-1.5 font-mono text-xs text-parchment-100 placeholder:text-parchment-600/60 focus:border-bronze-600 focus:outline-none"
+        />
+      </div>
+
+      <div className="mt-2 flex justify-end">
         <button
           onClick={add}
           disabled={!url.trim()}
@@ -395,6 +481,7 @@ function AddEndpoint({
     </div>
   );
 }
+
 
 function DefaultModelPicker({
   label,

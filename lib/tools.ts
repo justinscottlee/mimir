@@ -97,9 +97,6 @@ export async function runToolLoop(
   const toolEvents: ToolEvent[] = [];
 
   let lastMeta: Omit<ChatResult, "toolCalls" | "content"> = {};
-  // Committed transcript of prior rounds (text + tool markers). The live
-  // round's streaming text is appended to this when reporting via onText, so
-  // earlier prose and tool chips stay visible as the next round streams.
   let committed = "";
 
   for (let round = 0; round < maxRounds; round++) {
@@ -108,13 +105,11 @@ export async function runToolLoop(
         endpoint,
         apiKey,
         model,
-        // Pass full messages so tool_calls / tool_call_id linkage survives.
         messages: working,
         system,
         tools,
         signal,
       },
-      // Show committed prior rounds + this round's live text.
       (accumulated) => onText(committed + accumulated)
     );
 

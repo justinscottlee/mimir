@@ -102,10 +102,17 @@ export interface Endpoint {
   /** Base URL, e.g. http://192.168.1.50:8080 or https://api.groq.com/openai/v1 */
   url: string;
   /**
-   * Bearer token for hosted APIs (Groq, OpenAI, …). Omitted for local
-   * llama.cpp servers, which need no auth. Stored locally like all settings.
+   * Bearer token for hosted APIs (Groq, OpenAI, Anthropic, …). Sent as
+   * Authorization: Bearer <key>. Omitted for local llama.cpp servers, which
+   * need no auth. Stored locally like all settings.
    */
   apiKey?: string;
+  /**
+   * Model IDs to use instead of fetching /v1/models. Required for providers
+   * like Anthropic that don't expose a model-list endpoint. One model ID per
+   * line when edited in the UI.
+   */
+  manualModels?: string[];
 }
 
 /**
