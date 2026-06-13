@@ -58,18 +58,9 @@ from `/v1/chat/completions`.
 
 - Assistant messages render markdown (GFM): bold, tables, lists, blockquotes,
   syntax-highlighted code blocks with per-block copy buttons.
-- Long code blocks start collapsed (~320px) with a fade and an Expand button;
-  short ones show in full.
-- **Artifacts vs. code, by language tag.** A plain ```` ```html ````/`svg`/`xml`
-  block stays source (collapsible). A ```` ```html-preview ````/`svg-preview`
-  block renders live by default in a sandboxed iframe — no code view — for
-  widgets meant to be used in the chat. The `-preview` convention keeps
-  "generate HTML for me" cleanly separate from "build me a live widget" so
-  nothing renders by accident. Artifacts inherit the Talos theme (palette,
-  IBM Plex, bronze accents) via an injected base stylesheet
-  (`lib/artifactTheme.ts`); they can override it. Sandbox is
-  `allow-scripts` only — no same-origin, so artifacts can't reach app state,
-  cookies, or localStorage.
+- Long code blocks collapse (~320px) with a fade and an Expand button once
+  generation finishes; while streaming they stay fully expanded so the
+  control doesn't flicker as the code grows.
 - Generation stats under each assistant message: tok/s, output tokens,
   context usage (vs. the server's n_ctx from `/props`), and wall time.
   Server-reported usage/timings are preferred; falls back to client-side
@@ -114,11 +105,29 @@ Manage them in the Memories window: add, edit (click the text), toggle
 on/off (checkbox), delete. `lib/memory.ts` is the single source for both the
 tool schema and the injection prompt.
 
+## Skills
+
+Reusable instruction packs (SKILL.md format) the model loads on demand, via
+progressive disclosure:
+
+- **Discovery.** Enabled skills' name + description are injected into the
+  system prompt as a menu — one line each, cheap.
+- **Activation.** When a task matches, the model calls the `load_skill` tool
+  and gets that skill's full body back through the tool loop.
+- **Execution (not built).** If a skill references scripts, `load_skill` notes
+  them but cannot run them — that needs the workspace sandbox. The manager and
+  the tool result both mark this boundary clearly.
+
+Manage them in the Skills window: paste a SKILL.md to import (frontmatter or
+heading/paragraph fallback is parsed live, script references are detected),
+edit name/description/body, toggle on/off, delete. `lib/skills.ts` holds the
+parser, discovery prompt, and tool.
+
 ## Stubs (intentionally unbuilt)
 
-- **Workspaces** — agentic container concept; the view documents the plan.
-- **Skills / Tools** — manager windows with planned-feature notes. Skills are
-  aimed at the skills.sh folder format (SKILL.md + assets).
+- **Workspaces** — agentic container concept; also the home of the future
+  script-execution sandbox skills will use.
+- **Tools** — manager window with planned-feature notes.
 
 ## Ideas for next steps
 

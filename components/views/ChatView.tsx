@@ -5,6 +5,7 @@ import { uid, useTalos } from "@/lib/store";
 import { fetchContextSize, listModels } from "@/lib/llama";
 import { LlamaModel, Message } from "@/lib/types";
 import { buildMemoryPrompt, rememberTool } from "@/lib/memory";
+import { buildSkillsPrompt, loadSkillTool } from "@/lib/skills";
 import { runToolLoop, ToolEvent, ToolRegistry } from "@/lib/tools";
 import { IconCheck, IconCopy, IconResend, IconSend, IconStop, IconTrash } from "../icons";
 import Markdown from "../Markdown";
@@ -21,6 +22,7 @@ export default function ChatView({ conversationId }: { conversationId: string })
   const openWindow = useTalos((s) => s.openWindow);
   const memories = useTalos((s) => s.memories);
   const addMemory = useTalos((s) => s.addMemory);
+  const skills = useTalos((s) => s.skills);
 
   const [models, setModels] = useState<LlamaModel[]>([]);
   const [modelsError, setModelsError] = useState<string | null>(null);
@@ -94,16 +96,25 @@ export default function ChatView({ conversationId }: { conversationId: string })
 
     try {
       const memoryPrompt = buildMemoryPrompt(Object.values(memories));
+      const skillsPrompt = buildSkillsPrompt(Object.values(skills));
+      const system =
+        [memoryPrompt, skillsPrompt].filter(Boolean).join("\n\n") || undefined;
 
       // Build the tool registry. The remember handler is wired to the store so
-      // Talos owns the write; the model only expresses intent. New tools
-      // (web_search, file ops, …) register here and the loop handles them
-      // unchanged.
+      // Talos owns the write; the model only expresses intent. load_skill
+      // returns a skill's full instructions on demand. New tools (web_search,
+      // file ops, …) register here and the loop handles them unchanged.
       const savedThisRun: string[] = [];
       const registry: ToolRegistry = {
         remember: rememberTool((content, category) => {
           addMemory(content, { category, source: "auto" });
           savedThisRun.push(content);
+        }),
+        load_skill: loadSkillTool((name) => {
+          const match = Object.values(useTalos.getState().skills).find(
+            (s) => s.name === name
+          );
+          return match ?? null;
         }),
       };
 
@@ -112,7 +123,7 @@ export default function ChatView({ conversationId }: { conversationId: string })
           endpoint,
           model: current.model,
           messages: history.map((m) => ({ role: m.role, content: m.content })),
-          system: memoryPrompt ?? undefined,
+          system,
           registry,
           signal: controller.signal,
         },
@@ -317,7 +328,7 @@ const MessageRow = memo(
         {isUser ? (
           message.content
         ) : message.content ? (
-          <Markdown content={message.content} />
+          <Markdown content={message.content} isStreaming={isStreaming} />
         ) : (
           <span className="text-sm text-parchment-600">
             {isStreaming ? "▍" : "(empty response)"}

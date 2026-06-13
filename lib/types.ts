@@ -93,6 +93,31 @@ export interface Memory {
   updatedAt: number;
 }
 
+/**
+ * A skill is a reusable instruction pack the model can load on demand —
+ * modeled on the skills.sh / SKILL.md format. The instruction tier (name,
+ * description, body) is fully supported. Scripts are tracked for display but
+ * executing them needs a sandboxed backend that isn't built yet.
+ */
+export interface Skill {
+  id: string;
+  /** Short identifier the model uses to load the skill, e.g. "pdf-fill". */
+  name: string;
+  /** One-line summary shown in the discovery menu and the manager. */
+  description: string;
+  /** Full SKILL.md body — the procedure/instructions returned on load. */
+  body: string;
+  /**
+   * Paths of scripts the skill references (relative to the skill folder).
+   * Display-only for now; running them is a future backend capability.
+   */
+  scripts: string[];
+  /** When false, the skill is hidden from the model's discovery menu. */
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface LlamaModel {
   id: string;
 }

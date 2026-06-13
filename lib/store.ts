@@ -8,6 +8,7 @@ import {
   Memory,
   Message,
   Settings,
+  Skill,
   Tab,
   TabKind,
   WindowKind,
@@ -27,7 +28,7 @@ const WINDOW_SIZES: Record<WindowKind, { w: number; h: number }> = {
   conversations: { w: 640, h: 500 },
   workspaces: { w: 640, h: 500 },
   memories: { w: 580, h: 540 },
-  skills: { w: 560, h: 440 },
+  skills: { w: 620, h: 580 },
   tools: { w: 560, h: 460 },
   settings: { w: 660, h: 560 },
 };
@@ -40,6 +41,7 @@ interface TalosState {
   conversations: Record<string, Conversation>;
   workspaces: Record<string, Workspace>;
   memories: Record<string, Memory>;
+  skills: Record<string, Skill>;
   settings: Settings;
   searchOpen: boolean;
 
@@ -88,6 +90,17 @@ interface TalosState {
   deleteMemory: (id: string) => void;
   toggleMemory: (id: string) => void;
 
+  // Skills
+  addSkill: (skill: {
+    name: string;
+    description: string;
+    body: string;
+    scripts?: string[];
+  }) => string;
+  updateSkill: (id: string, patch: Partial<Omit<Skill, "id">>) => void;
+  deleteSkill: (id: string) => void;
+  toggleSkill: (id: string) => void;
+
   // Settings / UI
   setSettings: (patch: Partial<Settings>) => void;
   setSearchOpen: (open: boolean) => void;
@@ -103,6 +116,7 @@ export const useTalos = create<TalosState>()(
       conversations: {},
       workspaces: {},
       memories: {},
+      skills: {},
       settings: { endpoint: "http://localhost:8080", username: "operator" },
       searchOpen: false,
 
@@ -435,6 +449,56 @@ export const useTalos = create<TalosState>()(
           };
         }),
 
+      // ---------- Skills ----------
+
+      addSkill: (skill) => {
+        const id = uid("skill_");
+        const now = Date.now();
+        const record: Skill = {
+          id,
+          name: skill.name.trim(),
+          description: skill.description.trim(),
+          body: skill.body,
+          scripts: skill.scripts ?? [],
+          enabled: true,
+          createdAt: now,
+          updatedAt: now,
+        };
+        set((s) => ({ skills: { ...s.skills, [id]: record } }));
+        return id;
+      },
+
+      updateSkill: (id, patch) =>
+        set((s) => {
+          const skill = s.skills[id];
+          if (!skill) return s;
+          return {
+            skills: {
+              ...s.skills,
+              [id]: { ...skill, ...patch, updatedAt: Date.now() },
+            },
+          };
+        }),
+
+      deleteSkill: (id) =>
+        set((s) => {
+          const skills = { ...s.skills };
+          delete skills[id];
+          return { skills };
+        }),
+
+      toggleSkill: (id) =>
+        set((s) => {
+          const skill = s.skills[id];
+          if (!skill) return s;
+          return {
+            skills: {
+              ...s.skills,
+              [id]: { ...skill, enabled: !skill.enabled, updatedAt: Date.now() },
+            },
+          };
+        }),
+
       // ---------- Settings / UI ----------
 
       setSettings: (patch) =>
@@ -475,6 +539,7 @@ export const useTalos = create<TalosState>()(
         conversations: s.conversations,
         workspaces: s.workspaces,
         memories: s.memories,
+        skills: s.skills,
         settings: s.settings,
       }),
     }

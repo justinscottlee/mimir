@@ -1,87 +1,112 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { IconCheck, IconCopy } from "./icons";
 
-/** Collapsed code blocks taller than this (px) show an Expand button. */
+/** Code blocks taller than this (px) collapse with an Expand button. */
 const COLLAPSED_MAX_HEIGHT = 320;
 
-export default function Markdown({ content }: { content: string }) {
-  return (
-    <div className="md text-sm leading-relaxed">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          pre({ children }) {
-            const child = (
-              Array.isArray(children) ? children[0] : children
-            ) as React.ReactElement<{
-              className?: string;
-              children?: React.ReactNode;
-            }>;
-            const className = child?.props?.className ?? "";
-            const match = /language-([\w-]+)/.exec(className);
-            const lang = (match?.[1] ?? "text").toLowerCase();
-            const code = String(child?.props?.children ?? "").replace(/\n$/, "");
+/**
+ * While a message is still streaming, code blocks render fully expanded. The
+ * collapse measurement only settles once generation finishes — otherwise the
+ * block's height crosses the threshold repeatedly as tokens arrive and the
+ * Expand/Collapse control flickers.
+ */
+const StreamingContext = createContext(false);
 
-            return <CodeBlock language={lang} code={code} />;
-          },
-          code({ children, ...props }) {
-            return (
-              <code
-                className="rounded bg-ink-800 px-1.5 py-0.5 font-mono text-[0.85em] text-bronze-300"
-                {...props}
-              >
-                {children}
-              </code>
-            );
-          },
-          a({ children, href }) {
-            return (
-              <a
-                href={href}
-                target="_blank"
-                rel="noreferrer"
-                className="text-bronze-300 underline decoration-bronze-600 underline-offset-2 hover:text-bronze-400"
-              >
-                {children}
-              </a>
-            );
-          },
-          // Tables can be wider than the chat column; give them their own
-          // horizontal scroll so they never push the message bubble wider.
-          table({ children }) {
-            return (
-              <div className="md-table-scroll">
-                <table>{children}</table>
-              </div>
-            );
-          },
-        }}
-      >
-        {content}
-      </ReactMarkdown>
-    </div>
+export default function Markdown({
+  content,
+  isStreaming = false,
+}: {
+  content: string;
+  isStreaming?: boolean;
+}) {
+  return (
+    <StreamingContext.Provider value={isStreaming}>
+      <div className="md text-sm leading-relaxed">
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            pre({ children }) {
+              const child = (
+                Array.isArray(children) ? children[0] : children
+              ) as React.ReactElement<{
+                className?: string;
+                children?: React.ReactNode;
+              }>;
+              const className = child?.props?.className ?? "";
+              const match = /language-([\w-]+)/.exec(className);
+              const lang = (match?.[1] ?? "text").toLowerCase();
+              const code = String(child?.props?.children ?? "").replace(
+                /\n$/,
+                ""
+              );
+              return <CodeBlock language={lang} code={code} />;
+            },
+            code({ children, ...props }) {
+              return (
+                <code
+                  className="rounded bg-ink-800 px-1.5 py-0.5 font-mono text-[0.85em] text-bronze-300"
+                  {...props}
+                >
+                  {children}
+                </code>
+              );
+            },
+            a({ children, href }) {
+              return (
+                <a
+                  href={href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-bronze-300 underline decoration-bronze-600 underline-offset-2 hover:text-bronze-400"
+                >
+                  {children}
+                </a>
+              );
+            },
+            // Tables can be wider than the chat column; give them their own
+            // horizontal scroll so they never push the message bubble wider.
+            table({ children }) {
+              return (
+                <div className="md-table-scroll">
+                  <table>{children}</table>
+                </div>
+              );
+            },
+          }}
+        >
+          {content}
+        </ReactMarkdown>
+      </div>
+    </StreamingContext.Provider>
   );
 }
 
-/** Source code block. Tall blocks start collapsed with an Expand toggle. */
+/** Source code block. Tall blocks collapse with an Expand toggle — but only
+ *  once streaming has finished, to avoid flicker while the code is growing. */
 function CodeBlock({ language, code }: { language: string; code: string }) {
+  const isStreaming = useContext(StreamingContext);
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
 
-  // After render, check whether the content is taller than the collapsed cap.
+  // Measure overflow only when not streaming. While streaming we render full
+  // height and skip the threshold check entirely.
   useEffect(() => {
+    if (isStreaming) {
+      setOverflows(false);
+      return;
+    }
     const el = bodyRef.current;
     if (!el) return;
     setOverflows(el.scrollHeight > COLLAPSED_MAX_HEIGHT + 8);
-  }, [code]);
+  }, [code, isStreaming]);
 
   function copy() {
     navigator.clipboard.writeText(code).then(() => {
@@ -136,7 +161,6 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
         </SyntaxHighlighter>
 
         {collapsed && (
-          // Fade hint that there's more below.
           <div className="pointer-events-none sticky bottom-0 h-12 w-full bg-gradient-to-t from-ink-950 to-transparent" />
         )}
       </div>
