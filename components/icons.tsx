@@ -126,3 +126,15 @@ export const IconResend = (p: IconProps) => (
     <path d="M13.5 1.5v3h-3" />
   </Svg>
 );
+
+export const IconChevron = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="m4 6 4 4 4-4" />
+  </Svg>
+);
+
+export const IconSpark = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M8 2.5v3M8 10.5v3M2.5 8h3M10.5 8h3M4.2 4.2l2 2M9.8 9.8l2 2M11.8 4.2l-2 2M6.2 9.8l-2 2" />
+  </Svg>
+);

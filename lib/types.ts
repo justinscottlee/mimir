@@ -36,6 +36,8 @@ export interface MessageMeta {
   completionTokens?: number;
   tokensPerSecond?: number;
   durationMs?: number;
+  /** Total time the model spent inside <think> blocks, in ms. */
+  thinkingMs?: number;
   /** Server context window size (n_ctx) at the time of generation. */
   contextSize?: number;
 }
@@ -46,6 +48,20 @@ export interface Message {
   content: string;
   createdAt: number;
   meta?: MessageMeta;
+  /**
+   * Tool calls executed while producing this message, indexed to match the
+   * ⟦tool:N⟧ markers embedded in `content`. Lets the chat render tool chips
+   * inline and survive reload.
+   */
+  toolEvents?: ToolEventRecord[];
+}
+
+/** Persisted form of a tool event (mirrors ToolEvent in lib/tools.ts). */
+export interface ToolEventRecord {
+  index: number;
+  name: string;
+  args: Record<string, unknown>;
+  result: string;
 }
 
 export interface Conversation {

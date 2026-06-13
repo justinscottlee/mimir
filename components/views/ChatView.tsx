@@ -3,11 +3,21 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { uid, useTalos } from "@/lib/store";
 import { fetchContextSize, listModels } from "@/lib/llama";
-import { LlamaModel, Message } from "@/lib/types";
+import { LlamaModel, Message, ToolEventRecord } from "@/lib/types";
 import { buildMemoryPrompt, rememberTool } from "@/lib/memory";
 import { buildSkillsPrompt, loadSkillTool } from "@/lib/skills";
 import { runToolLoop, ToolEvent, ToolRegistry } from "@/lib/tools";
-import { IconCheck, IconCopy, IconResend, IconSend, IconStop, IconTrash } from "../icons";
+import { parseTranscript } from "@/lib/transcript";
+import {
+  IconCheck,
+  IconChevron,
+  IconCopy,
+  IconResend,
+  IconSend,
+  IconSpark,
+  IconStop,
+  IconTrash,
+} from "../icons";
 import Markdown from "../Markdown";
 
 export default function ChatView({ conversationId }: { conversationId: string }) {
@@ -29,7 +39,6 @@ export default function ChatView({ conversationId }: { conversationId: string })
   const [contextSize, setContextSize] = useState<number | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
-  const [savedNotice, setSavedNotice] = useState<string[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -104,11 +113,9 @@ export default function ChatView({ conversationId }: { conversationId: string })
       // Talos owns the write; the model only expresses intent. load_skill
       // returns a skill's full instructions on demand. New tools (web_search,
       // file ops, …) register here and the loop handles them unchanged.
-      const savedThisRun: string[] = [];
       const registry: ToolRegistry = {
         remember: rememberTool((content, category) => {
           addMemory(content, { category, source: "auto" });
-          savedThisRun.push(content);
         }),
         load_skill: loadSkillTool((name) => {
           const match = Object.values(useTalos.getState().skills).find(
@@ -117,6 +124,13 @@ export default function ChatView({ conversationId }: { conversationId: string })
           return match ?? null;
         }),
       };
+
+      // Track time spent inside <think> blocks by watching the stream for the
+      // open/close transitions. Handles the common single-block case exactly.
+      let thinkStartedAt: number | null = null;
+      let thinkingMs = 0;
+      let sawThinkOpen = false;
+      let sawThinkClose = false;
 
       const result = await runToolLoop(
         {
@@ -127,30 +141,54 @@ export default function ChatView({ conversationId }: { conversationId: string })
           registry,
           signal: controller.signal,
         },
-        // Streams the current round's text into the assistant bubble.
-        (accumulated) =>
+        // Streams the combined transcript (text + tool markers) into the bubble.
+        (accumulated) => {
+          if (!sawThinkOpen && accumulated.includes("<think>")) {
+            sawThinkOpen = true;
+            thinkStartedAt = performance.now();
+          }
+          if (
+            sawThinkOpen &&
+            !sawThinkClose &&
+            accumulated.includes("</think>")
+          ) {
+            sawThinkClose = true;
+            if (thinkStartedAt != null) {
+              thinkingMs = performance.now() - thinkStartedAt;
+            }
+          }
           patchMessage(conversationId, assistantMessage.id, {
             content: accumulated,
-          }),
-        // Fired after each tool runs — used here only to surface the banner.
-        (event: ToolEvent) => void event
+          });
+        },
+        // Persist each tool event as it completes so chips render inline and
+        // survive reload.
+        (event: ToolEvent) => {
+          const existing =
+            useTalos.getState().conversations[conversationId]?.messages.find(
+              (m) => m.id === assistantMessage.id
+            )?.toolEvents ?? [];
+          patchMessage(conversationId, assistantMessage.id, {
+            toolEvents: [...existing, event],
+          });
+        }
       );
 
-      if (savedThisRun.length > 0) setSavedNotice(savedThisRun);
+      // If thinking never closed (e.g. aborted mid-thought), still record what
+      // elapsed so the panel shows a duration.
+      if (sawThinkOpen && !sawThinkClose && thinkStartedAt != null) {
+        thinkingMs = performance.now() - thinkStartedAt;
+      }
 
-      // Commit the model's final prose. If it ended on a tool call with no
-      // closing prose, leave a short note rather than an empty bubble.
-      const finalContent =
-        result.content.trim() ||
-        (savedThisRun.length > 0
-          ? `_Saved ${savedThisRun.length} ${
-              savedThisRun.length === 1 ? "memory" : "memories"
-            }._`
-          : "");
-
+      // If the model ended without any closing prose but did run tools, the
+      // transcript already shows the chips — no placeholder needed.
       patchMessage(conversationId, assistantMessage.id, {
-        content: finalContent,
-        meta: { ...result.meta, contextSize: contextSize ?? undefined },
+        content: result.content,
+        meta: {
+          ...result.meta,
+          contextSize: contextSize ?? undefined,
+          thinkingMs: thinkingMs || undefined,
+        },
       });
     } catch (e) {
       if ((e as Error).name !== "AbortError") {
@@ -166,7 +204,6 @@ export default function ChatView({ conversationId }: { conversationId: string })
     const trimmed = text.trim();
     if (!trimmed || streaming) return;
 
-    setSavedNotice([]);
 
     const userMessage: Message = {
       id: uid("msg_"),
@@ -261,19 +298,6 @@ export default function ChatView({ conversationId }: { conversationId: string })
               {streamError}
             </div>
           )}
-          {savedNotice.length > 0 && (
-            <button
-              onClick={() => openWindow("memories")}
-              className="flex items-start gap-2 rounded-md border border-bronze-600/40 bg-bronze-600/10 px-3 py-2 text-left text-xs text-bronze-300 transition-colors hover:bg-bronze-600/20"
-            >
-              <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-bronze-400" />
-              <span>
-                Saved {savedNotice.length}{" "}
-                {savedNotice.length === 1 ? "memory" : "memories"} this turn.
-                Click to review in the Memories window.
-              </span>
-            </button>
-          )}
         </div>
       </div>
 
@@ -328,7 +352,12 @@ const MessageRow = memo(
         {isUser ? (
           message.content
         ) : message.content ? (
-          <Markdown content={message.content} isStreaming={isStreaming} />
+          <AssistantBody
+            content={message.content}
+            isStreaming={isStreaming}
+            toolEvents={message.toolEvents ?? []}
+            thinkingMs={message.meta?.thinkingMs}
+          />
         ) : (
           <span className="text-sm text-parchment-600">
             {isStreaming ? "▍" : "(empty response)"}
@@ -529,4 +558,177 @@ function ChatInput({
       </div>
     </div>
   );
+}
+
+/**
+ * Renders an assistant message as ordered segments: thinking panels, inline
+ * tool chips, and markdown prose, exactly where they appear in the stream.
+ */
+function AssistantBody({
+  content,
+  isStreaming,
+  toolEvents,
+  thinkingMs,
+}: {
+  content: string;
+  isStreaming: boolean;
+  toolEvents: ToolEventRecord[];
+  thinkingMs?: number;
+}) {
+  const segments = parseTranscript(content);
+
+  return (
+    <div className="flex flex-col gap-2">
+      {segments.map((seg, i) => {
+        if (seg.type === "think") {
+          return (
+            <ThinkingPanel
+              key={`think-${i}`}
+              text={seg.text}
+              live={seg.open && isStreaming}
+              thinkingMs={thinkingMs}
+            />
+          );
+        }
+        if (seg.type === "tool") {
+          const event = toolEvents.find((e) => e.index === seg.index);
+          return <ToolChip key={`tool-${seg.index}`} event={event} />;
+        }
+        return (
+          <Markdown key={`text-${i}`} content={seg.text} isStreaming={isStreaming} />
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Collapsible reasoning panel in the brand accent. Expanded and ticking while
+ * the model thinks; collapses to a summary with the elapsed duration after.
+ */
+function ThinkingPanel({
+  text,
+  live,
+  thinkingMs,
+}: {
+  text: string;
+  live: boolean;
+  thinkingMs?: number;
+}) {
+  // Open while thinking; default collapsed once done.
+  const [open, setOpen] = useState(live);
+  const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef<number | null>(null);
+
+  // Tick the duration up while live.
+  useEffect(() => {
+    if (!live) return;
+    setOpen(true);
+    if (startRef.current == null) startRef.current = performance.now();
+    const t = setInterval(() => {
+      if (startRef.current != null) {
+        setElapsed(performance.now() - startRef.current);
+      }
+    }, 100);
+    return () => clearInterval(t);
+  }, [live]);
+
+  // Collapse automatically when thinking finishes.
+  useEffect(() => {
+    if (!live) setOpen(false);
+  }, [live]);
+
+  const duration = live ? elapsed : thinkingMs;
+  const durationLabel =
+    duration != null ? `${(duration / 1000).toFixed(1)}s` : null;
+
+  return (
+    <div className="overflow-hidden rounded-md border border-bronze-600/40 bg-bronze-600/10">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-2 bg-bronze-600/15 px-3 py-1.5 text-left text-xs text-bronze-300 transition-colors hover:bg-bronze-600/25"
+      >
+        {live ? (
+          <IconSpark className="h-3.5 w-3.5 talos-spin text-bronze-400" />
+        ) : (
+          <IconSpark className="h-3.5 w-3.5 text-bronze-400" />
+        )}
+        <span className="font-medium">
+          {live ? "Thinking" : "Thought"}
+          {durationLabel ? ` · ${durationLabel}` : ""}
+        </span>
+        <div className="flex-1" />
+        <IconChevron
+          className={[
+            "h-3.5 w-3.5 transition-transform",
+            open ? "" : "-rotate-90",
+          ].join(" ")}
+        />
+      </button>
+      {open && (
+        <div className="border-t border-bronze-600/30 px-3 py-2">
+          <div className="whitespace-pre-wrap text-xs leading-relaxed text-parchment-400">
+            {text.trim() || (live ? "…" : "")}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Inline chip showing a tool call that ran, expandable for its result. */
+function ToolChip({ event }: { event?: ToolEventRecord }) {
+  const [open, setOpen] = useState(false);
+  if (!event) {
+    // Marker present but event not yet persisted (mid-stream) — show pending.
+    return (
+      <div className="inline-flex items-center gap-2 self-start rounded-md border border-ink-700 bg-ink-850 px-2.5 py-1 text-xs text-parchment-400">
+        <IconSpark className="h-3.5 w-3.5 talos-spin text-bronze-400" />
+        running tool…
+      </div>
+    );
+  }
+
+  const label = describeTool(event);
+
+  return (
+    <div className="self-start overflow-hidden rounded-md border border-ink-700 bg-ink-850">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-2 px-2.5 py-1 text-left text-xs text-parchment-400 transition-colors hover:bg-ink-800"
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-bronze-400" />
+        <span className="font-mono text-bronze-300">{event.name}</span>
+        <span className="text-parchment-600">{label}</span>
+        <IconChevron
+          className={[
+            "h-3 w-3 transition-transform",
+            open ? "" : "-rotate-90",
+          ].join(" ")}
+        />
+      </button>
+      {open && (
+        <div className="border-t border-ink-700 px-2.5 py-1.5">
+          <div className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-parchment-400">
+            {event.result}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A short human label for a tool event, by tool name. */
+function describeTool(event: ToolEventRecord): string {
+  if (event.name === "remember") {
+    const c = event.args.content;
+    return typeof c === "string"
+      ? `saved “${c.length > 40 ? c.slice(0, 40) + "…" : c}”`
+      : "saved a memory";
+  }
+  if (event.name === "load_skill") {
+    const n = event.args.name;
+    return typeof n === "string" ? `loaded ${n}` : "loaded a skill";
+  }
+  return "";
 }

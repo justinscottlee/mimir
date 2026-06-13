@@ -140,3 +140,13 @@ body {
 .md tr:nth-child(even) td {
   background: theme("colors.ink.900");
 }
+
+/* Thinking indicator spinner */
+@keyframes talos-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.talos-spin {
+  animation: talos-spin 1.4s linear infinite;
+}

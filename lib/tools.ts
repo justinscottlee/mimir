@@ -34,17 +34,33 @@ export interface RunLoopParams {
 }
 
 export interface ToolEvent {
+  /** Stable index used by the inline transcript marker. */
+  index: number;
   name: string;
   args: Record<string, unknown>;
   result: string;
 }
 
+/**
+ * Sentinel injected into the message content where a tool call occurred, so
+ * the display can render the tool chip inline, in order. Parsed by
+ * `parseTranscript` in the chat view. Format: ⟦tool:0⟧ referencing
+ * toolEvents[0]. The bracket glyphs are unlikely to appear in model output.
+ */
+export const TOOL_MARKER_RE = /⟦tool:(\d+)⟧/g;
+export function toolMarker(index: number): string {
+  return `\n\n⟦tool:${index}⟧\n\n`;
+}
+
 export interface RunLoopResult {
-  /** Final assistant prose (the last completion that made no tool calls). */
+  /**
+   * The full assistant transcript across all rounds: each round's text in
+   * order, with a ⟦tool:N⟧ marker inserted where each tool call occurred.
+   */
   content: string;
   /** Stats from the final completion. */
   meta: Omit<ChatResult, "toolCalls" | "content">;
-  /** Every tool call executed across all rounds, in order. */
+  /** Every tool call executed across all rounds, indexed to match markers. */
   toolEvents: ToolEvent[];
 }
 
@@ -78,7 +94,10 @@ export async function runToolLoop(
   const toolEvents: ToolEvent[] = [];
 
   let lastMeta: Omit<ChatResult, "toolCalls" | "content"> = {};
-  let finalText = "";
+  // Committed transcript of prior rounds (text + tool markers). The live
+  // round's streaming text is appended to this when reporting via onText, so
+  // earlier prose and tool chips stay visible as the next round streams.
+  let committed = "";
 
   for (let round = 0; round < maxRounds; round++) {
     const result = await streamChat(
@@ -91,21 +110,23 @@ export async function runToolLoop(
         tools,
         signal,
       },
-      onText
+      // Show committed prior rounds + this round's live text.
+      (accumulated) => onText(committed + accumulated)
     );
 
     const { toolCalls, content, ...meta } = result;
     lastMeta = meta;
 
-    // No tool calls → the model is done. Whatever it streamed is the answer.
+    // No tool calls → done. Append this round's text and finish.
     if (toolCalls.length === 0) {
-      finalText = content;
+      committed += content;
       break;
     }
 
-    // Record the assistant's tool-call turn so the model sees its own request
-    // alongside the results on the next round. Keep any prose it produced
-    // before the call.
+    // Keep this round's prose (it precedes the tool calls), then a marker per
+    // tool call so the display can render chips inline and in order.
+    committed += content;
+
     working.push({
       role: "assistant",
       content,
@@ -139,12 +160,15 @@ export async function runToolLoop(
       }
 
       const event: ToolEvent = {
+        index: toolEvents.length,
         name: call.name,
         args: parsedArgs,
         result: resultText,
       };
+      committed += toolMarker(event.index);
       toolEvents.push(event);
       onToolEvent?.(event);
+      onText(committed); // reflect the new chip immediately
 
       working.push({
         role: "tool",
@@ -153,12 +177,7 @@ export async function runToolLoop(
         name: call.name,
       });
     }
-
-    // If we've hit the cap, stop and surface whatever prose exists.
-    if (round === maxRounds - 1) {
-      finalText = "";
-    }
   }
 
-  return { content: finalText, meta: lastMeta, toolEvents };
+  return { content: committed, meta: lastMeta, toolEvents };
 }

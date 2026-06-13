@@ -67,6 +67,14 @@ from `/v1/chat/completions`.
   estimates when the server doesn't report them.
 - Message actions on hover: copy and delete on every message; resend on user
   messages (truncates everything after and regenerates).
+- **Thinking.** `<think>…</think>` blocks from reasoning models render in a
+  collapsible accent panel showing how long the model thought. While
+  generating it stays expanded with a spinner and a live-ticking timer, then
+  auto-collapses to a "Thought · 4.2s" summary you can reopen.
+- **Inline tool events.** Tool calls (memory saves, skill loads) render as
+  chips in the chat at the point they occurred — expandable for the tool's
+  result — so the timeline reflects the real order of thinking, tools, and
+  prose.
 
 ## Memories
 
@@ -78,8 +86,9 @@ model:
 - **Write (tool call).** Each request advertises a `remember` function tool.
   When the model judges a fact worth keeping, it calls the tool; the tool
   loop (see below) runs it, stores the memory (marked `auto`), feeds the
-  result back to the model, and lets it continue its reply. A "saved N
-  memories" banner links to the manager. The model never writes storage
+  result back to the model, and lets it continue its reply. The save appears
+  as an inline chip in the chat at the point it happened. The model never
+  writes storage
   directly — it emits intent, Talos owns the mutation, every write is visible
   and reversible. Models without function-calling simply never call it and
   only the injection path runs (graceful degradation).
