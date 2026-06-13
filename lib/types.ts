@@ -69,6 +69,30 @@ export interface Settings {
   username: string;
 }
 
+/**
+ * A durable fact the model can recall across conversations. Memories are
+ * surfaced to the model two ways: every "always" memory is injected into the
+ * system prompt, and the model can write new ones via a tool call (see
+ * lib/memoryTool.ts). Stored locally alongside everything else.
+ */
+export interface Memory {
+  id: string;
+  /** The fact itself, phrased as a standalone statement. */
+  content: string;
+  /** Optional grouping for the manager UI and future scoping. */
+  category?: string;
+  /**
+   * "always" memories are always injected. "auto" memories were created by
+   * the model and behave the same for now, but the distinction lets you later
+   * add relevance-based retrieval without re-tagging everything.
+   */
+  source: "user" | "auto";
+  /** When false, the memory is kept but not injected. */
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface LlamaModel {
   id: string;
 }

@@ -5,6 +5,7 @@ import { persist } from "zustand/middleware";
 import {
   Conversation,
   FloatingWindow,
+  Memory,
   Message,
   Settings,
   Tab,
@@ -25,7 +26,7 @@ export function uid(prefix = ""): string {
 const WINDOW_SIZES: Record<WindowKind, { w: number; h: number }> = {
   conversations: { w: 640, h: 500 },
   workspaces: { w: 640, h: 500 },
-  memories: { w: 560, h: 440 },
+  memories: { w: 580, h: 540 },
   skills: { w: 560, h: 440 },
   tools: { w: 560, h: 460 },
   settings: { w: 660, h: 560 },
@@ -38,6 +39,7 @@ interface TalosState {
   zTop: number;
   conversations: Record<string, Conversation>;
   workspaces: Record<string, Workspace>;
+  memories: Record<string, Memory>;
   settings: Settings;
   searchOpen: boolean;
 
@@ -77,6 +79,15 @@ interface TalosState {
   deleteWorkspace: (id: string) => void;
   setWorkspaceName: (id: string, name: string) => void;
 
+  // Memories
+  addMemory: (
+    content: string,
+    opts?: { category?: string; source?: "user" | "auto" }
+  ) => string;
+  updateMemory: (id: string, patch: Partial<Omit<Memory, "id">>) => void;
+  deleteMemory: (id: string) => void;
+  toggleMemory: (id: string) => void;
+
   // Settings / UI
   setSettings: (patch: Partial<Settings>) => void;
   setSearchOpen: (open: boolean) => void;
@@ -91,6 +102,7 @@ export const useTalos = create<TalosState>()(
       zTop: 10,
       conversations: {},
       workspaces: {},
+      memories: {},
       settings: { endpoint: "http://localhost:8080", username: "operator" },
       searchOpen: false,
 
@@ -374,6 +386,55 @@ export const useTalos = create<TalosState>()(
           };
         }),
 
+      // ---------- Memories ----------
+
+      addMemory: (content, opts) => {
+        const id = uid("mem_");
+        const now = Date.now();
+        const memory: Memory = {
+          id,
+          content: content.trim(),
+          category: opts?.category?.trim() || undefined,
+          source: opts?.source ?? "user",
+          enabled: true,
+          createdAt: now,
+          updatedAt: now,
+        };
+        set((s) => ({ memories: { ...s.memories, [id]: memory } }));
+        return id;
+      },
+
+      updateMemory: (id, patch) =>
+        set((s) => {
+          const mem = s.memories[id];
+          if (!mem) return s;
+          return {
+            memories: {
+              ...s.memories,
+              [id]: { ...mem, ...patch, updatedAt: Date.now() },
+            },
+          };
+        }),
+
+      deleteMemory: (id) =>
+        set((s) => {
+          const memories = { ...s.memories };
+          delete memories[id];
+          return { memories };
+        }),
+
+      toggleMemory: (id) =>
+        set((s) => {
+          const mem = s.memories[id];
+          if (!mem) return s;
+          return {
+            memories: {
+              ...s.memories,
+              [id]: { ...mem, enabled: !mem.enabled, updatedAt: Date.now() },
+            },
+          };
+        }),
+
       // ---------- Settings / UI ----------
 
       setSettings: (patch) =>
@@ -413,6 +474,7 @@ export const useTalos = create<TalosState>()(
         zTop: s.zTop,
         conversations: s.conversations,
         workspaces: s.workspaces,
+        memories: s.memories,
         settings: s.settings,
       }),
     }

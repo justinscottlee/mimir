@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { uid, useTalos } from "@/lib/store";
 import { fetchContextSize, listModels, streamChat } from "@/lib/llama";
 import { LlamaModel, Message } from "@/lib/types";
+import { buildMemoryPrompt, MEMORY_TOOLS, parseRememberArgs } from "@/lib/memory";
 import { IconCheck, IconCopy, IconResend, IconSend, IconStop, IconTrash } from "../icons";
 import Markdown from "../Markdown";
 
@@ -17,6 +18,8 @@ export default function ChatView({ conversationId }: { conversationId: string })
   const setConversationModel = useTalos((s) => s.setConversationModel);
   const setConversationTitle = useTalos((s) => s.setConversationTitle);
   const openWindow = useTalos((s) => s.openWindow);
+  const memories = useTalos((s) => s.memories);
+  const addMemory = useTalos((s) => s.addMemory);
 
   const [models, setModels] = useState<LlamaModel[]>([]);
   const [modelsError, setModelsError] = useState<string | null>(null);
@@ -24,6 +27,7 @@ export default function ChatView({ conversationId }: { conversationId: string })
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
+  const [savedNotice, setSavedNotice] = useState<string[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -84,11 +88,14 @@ export default function ChatView({ conversationId }: { conversationId: string })
     abortRef.current = controller;
 
     try {
-      const meta = await streamChat(
+      const memoryPrompt = buildMemoryPrompt(Object.values(memories));
+      const result = await streamChat(
         {
           endpoint,
           model: current.model,
           messages: history.map((m) => ({ role: m.role, content: m.content })),
+          system: memoryPrompt ?? undefined,
+          tools: MEMORY_TOOLS,
           signal: controller.signal,
         },
         (accumulated) =>
@@ -96,6 +103,37 @@ export default function ChatView({ conversationId }: { conversationId: string })
             content: accumulated,
           })
       );
+
+      // Handle any `remember` tool calls the model emitted. Talos owns the
+      // write — the model only expressed intent. Each save is visible and
+      // reversible in the Memories window.
+      const saved: string[] = [];
+      for (const call of result.toolCalls) {
+        if (call.name !== "remember") continue;
+        const args = parseRememberArgs(call.arguments);
+        if (args) {
+          addMemory(args.content, { category: args.category, source: "auto" });
+          saved.push(args.content);
+        }
+      }
+      if (saved.length > 0) setSavedNotice(saved);
+
+      // If the model produced no prose (pure tool call), leave a short note so
+      // the turn isn't an empty bubble.
+      const finalContent =
+        useTalos.getState().conversations[conversationId]?.messages.find(
+          (m) => m.id === assistantMessage.id
+        )?.content ?? "";
+      if (!finalContent.trim() && saved.length > 0) {
+        patchMessage(conversationId, assistantMessage.id, {
+          content: `_Saved ${saved.length} ${
+            saved.length === 1 ? "memory" : "memories"
+          }._`,
+        });
+      }
+
+      const { toolCalls, ...meta } = result;
+      void toolCalls;
       patchMessage(conversationId, assistantMessage.id, {
         meta: { ...meta, contextSize: contextSize ?? undefined },
       });
@@ -114,6 +152,7 @@ export default function ChatView({ conversationId }: { conversationId: string })
     if (!text || streaming) return;
 
     setInput("");
+    setSavedNotice([]);
 
     const userMessage: Message = {
       id: uid("msg_"),
@@ -173,11 +212,6 @@ export default function ChatView({ conversationId }: { conversationId: string })
             {modelsError ? "endpoint unreachable" : "loading…"}
           </span>
         )}
-        {contextSize && (
-          <span className="font-mono text-[11px] text-parchment-600">
-            ctx {formatTokens(contextSize)}
-          </span>
-        )}
         {modelsError && (
           <button
             onClick={() => openWindow("settings")}
@@ -210,6 +244,19 @@ export default function ChatView({ conversationId }: { conversationId: string })
             <div className="rounded-md border border-signal-err/40 bg-signal-err/10 px-3 py-2 text-sm text-signal-err">
               {streamError}
             </div>
+          )}
+          {savedNotice.length > 0 && (
+            <button
+              onClick={() => openWindow("memories")}
+              className="flex items-start gap-2 rounded-md border border-bronze-600/40 bg-bronze-600/10 px-3 py-2 text-left text-xs text-bronze-300 transition-colors hover:bg-bronze-600/20"
+            >
+              <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-bronze-400" />
+              <span>
+                Saved {savedNotice.length}{" "}
+                {savedNotice.length === 1 ? "memory" : "memories"} this turn.
+                Click to review in the Memories window.
+              </span>
+            </button>
           )}
         </div>
       </div>

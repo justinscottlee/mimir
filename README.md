@@ -58,9 +58,18 @@ from `/v1/chat/completions`.
 
 - Assistant messages render markdown (GFM): bold, tables, lists, blockquotes,
   syntax-highlighted code blocks with per-block copy buttons.
-- Code blocks tagged `html`, `svg`, or `xml` get a Code/Preview toggle that
-  renders the artifact live in a sandboxed iframe (`sandbox="allow-scripts"`,
-  no same-origin access, so artifacts can't touch app state).
+- Long code blocks start collapsed (~320px) with a fade and an Expand button;
+  short ones show in full.
+- **Artifacts vs. code, by language tag.** A plain ```` ```html ````/`svg`/`xml`
+  block stays source (collapsible). A ```` ```html-preview ````/`svg-preview`
+  block renders live by default in a sandboxed iframe — no code view — for
+  widgets meant to be used in the chat. The `-preview` convention keeps
+  "generate HTML for me" cleanly separate from "build me a live widget" so
+  nothing renders by accident. Artifacts inherit the Talos theme (palette,
+  IBM Plex, bronze accents) via an injected base stylesheet
+  (`lib/artifactTheme.ts`); they can override it. Sandbox is
+  `allow-scripts` only — no same-origin, so artifacts can't reach app state,
+  cookies, or localStorage.
 - Generation stats under each assistant message: tok/s, output tokens,
   context usage (vs. the server's n_ctx from `/props`), and wall time.
   Server-reported usage/timings are preferred; falls back to client-side
@@ -68,11 +77,30 @@ from `/v1/chat/completions`.
 - Message actions on hover: copy and delete on every message; resend on user
   messages (truncates everything after and regenerates).
 
+## Memories
+
+Durable facts the model recalls across conversations. Two paths reach the
+model:
+
+- **Read (injection).** Before each completion, enabled memories are grouped
+  by category and prepended as a system message. The model just "knows" them.
+- **Write (tool call).** Each request advertises a `remember` function tool.
+  When the model judges a fact worth keeping, it calls the tool; Talos
+  intercepts the call, stores the memory (marked `auto`), and shows a "saved
+  N memories" banner linking to the manager. The model never writes storage
+  directly — it emits intent, Talos owns the mutation, every write is visible
+  and reversible. Models without function-calling simply never call it and
+  only the injection path runs (graceful degradation).
+
+Manage them in the Memories window: add, edit (click the text), toggle
+on/off (checkbox), delete. `lib/memory.ts` is the single source for both the
+tool schema and the injection prompt.
+
 ## Stubs (intentionally unbuilt)
 
 - **Workspaces** — agentic container concept; the view documents the plan.
-- **Memories / Skills / Tools** — manager pages exist with planned-feature
-  notes. Skills are aimed at the skills.sh folder format (SKILL.md + assets).
+- **Skills / Tools** — manager windows with planned-feature notes. Skills are
+  aimed at the skills.sh folder format (SKILL.md + assets).
 
 ## Ideas for next steps
 

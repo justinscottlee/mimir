@@ -47,21 +47,46 @@ export async function fetchContextSize(
   }
 }
 
+export interface ToolDef {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
+export interface ToolCall {
+  name: string;
+  /** Raw JSON argument string as assembled from the stream. */
+  arguments: string;
+}
+
 export interface ChatParams {
   endpoint: string;
   model: string;
   messages: { role: Role; content: string }[];
+  /** Optional system text prepended ahead of the conversation. */
+  system?: string;
+  /** Tools advertised to the model (OpenAI function-calling format). */
+  tools?: ToolDef[];
   signal?: AbortSignal;
+}
+
+export interface ChatResult extends MessageMeta {
+  /** Any tool calls the model emitted during this completion. */
+  toolCalls: ToolCall[];
 }
 
 /**
  * Streams a chat completion. `onToken` receives the accumulated text after
- * every delta. Resolves with generation stats once the stream ends.
+ * every delta. Resolves with generation stats and any tool calls once the
+ * stream ends.
  */
 export async function streamChat(
-  { endpoint, model, messages, signal }: ChatParams,
+  { endpoint, model, messages, system, tools, signal }: ChatParams,
   onToken: (accumulated: string) => void
-): Promise<MessageMeta> {
+): Promise<ChatResult> {
   const started = performance.now();
 
   const res = await fetch("/api/llama/v1/chat/completions", {
@@ -70,7 +95,10 @@ export async function streamChat(
     signal,
     body: JSON.stringify({
       model,
-      messages,
+      messages: system
+        ? [{ role: "system", content: system }, ...messages]
+        : messages,
+      ...(tools && tools.length > 0 ? { tools } : {}),
       stream: true,
       // llama.cpp honors this and reports token usage in the final chunk.
       stream_options: { include_usage: true },
@@ -91,6 +119,8 @@ export async function streamChat(
   let timings:
     | { prompt_n?: number; predicted_n?: number; predicted_per_second?: number }
     | undefined;
+  // Tool calls stream in fragments keyed by index; assemble them here.
+  const toolAcc = new Map<number, { name: string; arguments: string }>();
 
   try {
     while (true) {
@@ -109,11 +139,23 @@ export async function streamChat(
         if (payload === "[DONE]") continue;
         try {
           const json = JSON.parse(payload);
-          const delta = json.choices?.[0]?.delta?.content;
+          const choiceDelta = json.choices?.[0]?.delta;
+          const delta = choiceDelta?.content;
           if (delta) {
             accumulated += delta;
             chunkCount++;
             onToken(accumulated);
+          }
+          // Tool-call fragments: { index, function: { name?, arguments? } }
+          const tcs = choiceDelta?.tool_calls;
+          if (Array.isArray(tcs)) {
+            for (const tc of tcs) {
+              const idx = tc.index ?? 0;
+              const entry = toolAcc.get(idx) ?? { name: "", arguments: "" };
+              if (tc.function?.name) entry.name = tc.function.name;
+              if (tc.function?.arguments) entry.arguments += tc.function.arguments;
+              toolAcc.set(idx, entry);
+            }
           }
           if (json.usage) usage = json.usage;
           if (json.timings) timings = json.timings;
@@ -135,5 +177,15 @@ export async function streamChat(
     timings?.predicted_per_second ??
     (durationMs > 0 ? completionTokens / (durationMs / 1000) : undefined);
 
-  return { promptTokens, completionTokens, tokensPerSecond, durationMs };
+  const toolCalls: ToolCall[] = Array.from(toolAcc.values()).filter(
+    (t) => t.name
+  );
+
+  return {
+    promptTokens,
+    completionTokens,
+    tokensPerSecond,
+    durationMs,
+    toolCalls,
+  };
 }
