@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* IBM Plex is referenced in the Tailwind font stacks with system fallbacks.
+   To self-host it later: `npm i @fontsource/ibm-plex-sans @fontsource/ibm-plex-mono`
+   and import them in app/layout.tsx. */
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  @apply bg-ink-950 text-parchment-100 antialiased;
+}
+
+/* Quiet, consistent scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: theme("colors.ink.700") transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  @apply rounded-full bg-ink-700;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Visible keyboard focus without mouse-click rings */
+:focus-visible {
+  outline: 2px solid theme("colors.bronze.400");
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
