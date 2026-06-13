@@ -2,28 +2,32 @@
 
 import { useEffect, useRef, useState } from "react";
 import { uid, useTalos } from "@/lib/store";
-import { listModels, streamChat } from "@/lib/llama";
+import { fetchContextSize, listModels, streamChat } from "@/lib/llama";
 import { LlamaModel, Message } from "@/lib/types";
-import { IconSend, IconStop } from "../icons";
+import { IconCheck, IconCopy, IconResend, IconSend, IconStop, IconTrash } from "../icons";
+import Markdown from "../Markdown";
 
 export default function ChatView({ conversationId }: { conversationId: string }) {
   const conversation = useTalos((s) => s.conversations[conversationId]);
   const endpoint = useTalos((s) => s.settings.endpoint);
   const appendMessage = useTalos((s) => s.appendMessage);
-  const updateMessageContent = useTalos((s) => s.updateMessageContent);
+  const patchMessage = useTalos((s) => s.patchMessage);
+  const deleteMessage = useTalos((s) => s.deleteMessage);
+  const truncateAfterMessage = useTalos((s) => s.truncateAfterMessage);
   const setConversationModel = useTalos((s) => s.setConversationModel);
   const setConversationTitle = useTalos((s) => s.setConversationTitle);
-  const openTab = useTalos((s) => s.openTab);
+  const openWindow = useTalos((s) => s.openWindow);
 
   const [models, setModels] = useState<LlamaModel[]>([]);
   const [modelsError, setModelsError] = useState<string | null>(null);
+  const [contextSize, setContextSize] = useState<number | null>(null);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Fetch available models from the endpoint.
+  // Fetch available models and the server context size.
   useEffect(() => {
     let cancelled = false;
     setModelsError(null);
@@ -31,12 +35,13 @@ export default function ChatView({ conversationId }: { conversationId: string })
       .then((m) => {
         if (cancelled) return;
         setModels(m);
-        // Default the conversation to the first model if none is set.
-        if (m.length > 0 && !conversation?.model) {
+        const current = useTalos.getState().conversations[conversationId];
+        if (m.length > 0 && !current?.model) {
           setConversationModel(conversationId, m[0].id);
         }
       })
       .catch((e) => !cancelled && setModelsError(e.message));
+    fetchContextSize(endpoint).then((n) => !cancelled && setContextSize(n));
     return () => {
       cancelled = true;
     };
@@ -56,32 +61,15 @@ export default function ChatView({ conversationId }: { conversationId: string })
     );
   }
 
-  async function send() {
-    const text = input.trim();
-    if (!text || streaming || !conversation) return;
-    if (!conversation.model) {
+  /** Streams a completion for the given history into a new assistant message. */
+  async function runCompletion(history: Message[]) {
+    const current = useTalos.getState().conversations[conversationId];
+    if (!current?.model) {
       setStreamError("Pick a model first — none is selected.");
       return;
     }
 
-    setInput("");
     setStreamError(null);
-
-    const userMessage: Message = {
-      id: uid("msg_"),
-      role: "user",
-      content: text,
-      createdAt: Date.now(),
-    };
-    appendMessage(conversationId, userMessage);
-
-    // First user message names the conversation.
-    if (conversation.messages.length === 0) {
-      setConversationTitle(
-        conversationId,
-        text.length > 42 ? text.slice(0, 42) + "…" : text
-      );
-    }
 
     const assistantMessage: Message = {
       id: uid("msg_"),
@@ -91,26 +79,26 @@ export default function ChatView({ conversationId }: { conversationId: string })
     };
     appendMessage(conversationId, assistantMessage);
 
-    const history = [...conversation.messages, userMessage].map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
-
     setStreaming(true);
     const controller = new AbortController();
     abortRef.current = controller;
 
     try {
-      let acc = "";
-      for await (const token of streamChat({
-        endpoint,
-        model: conversation.model,
-        messages: history,
-        signal: controller.signal,
-      })) {
-        acc += token;
-        updateMessageContent(conversationId, assistantMessage.id, acc);
-      }
+      const meta = await streamChat(
+        {
+          endpoint,
+          model: current.model,
+          messages: history.map((m) => ({ role: m.role, content: m.content })),
+          signal: controller.signal,
+        },
+        (accumulated) =>
+          patchMessage(conversationId, assistantMessage.id, {
+            content: accumulated,
+          })
+      );
+      patchMessage(conversationId, assistantMessage.id, {
+        meta: { ...meta, contextSize: contextSize ?? undefined },
+      });
     } catch (e) {
       if ((e as Error).name !== "AbortError") {
         setStreamError((e as Error).message);
@@ -119,6 +107,42 @@ export default function ChatView({ conversationId }: { conversationId: string })
       setStreaming(false);
       abortRef.current = null;
     }
+  }
+
+  async function send() {
+    const text = input.trim();
+    if (!text || streaming) return;
+
+    setInput("");
+
+    const userMessage: Message = {
+      id: uid("msg_"),
+      role: "user",
+      content: text,
+      createdAt: Date.now(),
+    };
+
+    const before = useTalos.getState().conversations[conversationId];
+    appendMessage(conversationId, userMessage);
+
+    // First user message names the conversation.
+    if (before && before.messages.length === 0) {
+      setConversationTitle(
+        conversationId,
+        text.length > 42 ? text.slice(0, 42) + "…" : text
+      );
+    }
+
+    await runCompletion([...(before?.messages ?? []), userMessage]);
+  }
+
+  /** Drops everything after a user message and regenerates from it. */
+  async function resend(messageId: string) {
+    if (streaming) return;
+    truncateAfterMessage(conversationId, messageId);
+    const current = useTalos.getState().conversations[conversationId];
+    if (!current) return;
+    await runCompletion(current.messages);
   }
 
   function stop() {
@@ -149,9 +173,14 @@ export default function ChatView({ conversationId }: { conversationId: string })
             {modelsError ? "endpoint unreachable" : "loading…"}
           </span>
         )}
+        {contextSize && (
+          <span className="font-mono text-[11px] text-parchment-600">
+            ctx {formatTokens(contextSize)}
+          </span>
+        )}
         {modelsError && (
           <button
-            onClick={() => openTab("settings")}
+            onClick={() => openWindow("settings")}
             className="ml-auto text-xs text-bronze-300 hover:underline"
           >
             Check endpoint in Settings →
@@ -161,7 +190,7 @@ export default function ChatView({ conversationId }: { conversationId: string })
 
       {/* Messages */}
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex max-w-3xl flex-col gap-5 px-5 py-6">
+        <div className="mx-auto flex max-w-3xl flex-col gap-6 px-5 py-6">
           {conversation.messages.length === 0 && (
             <p className="pt-16 text-center text-sm text-parchment-600">
               Send a message to begin. The full conversation is kept on this
@@ -169,7 +198,13 @@ export default function ChatView({ conversationId }: { conversationId: string })
             </p>
           )}
           {conversation.messages.map((m) => (
-            <MessageBubble key={m.id} message={m} streaming={streaming} />
+            <MessageRow
+              key={m.id}
+              message={m}
+              streaming={streaming}
+              onDelete={() => deleteMessage(conversationId, m.id)}
+              onResend={m.role === "user" ? () => resend(m.id) : undefined}
+            />
           ))}
           {streamError && (
             <div className="rounded-md border border-signal-err/40 bg-signal-err/10 px-3 py-2 text-sm text-signal-err">
@@ -221,30 +256,151 @@ export default function ChatView({ conversationId }: { conversationId: string })
   );
 }
 
-function MessageBubble({
+function MessageRow({
   message,
   streaming,
+  onDelete,
+  onResend,
 }: {
   message: Message;
   streaming: boolean;
+  onDelete: () => void;
+  onResend?: () => void;
 }) {
   const isUser = message.role === "user";
+  const [copied, setCopied] = useState(false);
+
+  function copy() {
+    navigator.clipboard.writeText(message.content).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+
   return (
-    <div className={isUser ? "flex justify-end" : "flex justify-start"}>
+    <div
+      className={[
+        "group flex flex-col gap-1",
+        isUser ? "items-end" : "items-start",
+      ].join(" ")}
+    >
       <div
         className={[
-          "max-w-[85%] whitespace-pre-wrap rounded-lg px-4 py-2.5 text-sm leading-relaxed",
+          "max-w-[88%] rounded-lg px-4 py-2.5",
           isUser
-            ? "bg-bronze-600/20 text-parchment-100"
-            : "border border-ink-700 bg-ink-900 text-parchment-100",
+            ? "whitespace-pre-wrap bg-bronze-600/20 text-sm leading-relaxed text-parchment-100"
+            : "w-full border border-ink-700 bg-ink-900 text-parchment-100",
         ].join(" ")}
       >
-        {message.content || (
-          <span className="text-parchment-600">
+        {isUser ? (
+          message.content
+        ) : message.content ? (
+          <Markdown content={message.content} />
+        ) : (
+          <span className="text-sm text-parchment-600">
             {streaming ? "▍" : "(empty response)"}
           </span>
         )}
       </div>
+
+      {/* Meta + actions row */}
+      <div
+        className={[
+          "flex items-center gap-1.5 px-1 font-mono text-[11px] text-parchment-600",
+          isUser ? "flex-row-reverse" : "",
+        ].join(" ")}
+      >
+        {!isUser && message.meta && <MetaLine meta={message.meta} />}
+        <div
+          className={[
+            "flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100",
+            isUser ? "flex-row-reverse" : "",
+          ].join(" ")}
+        >
+          <ActionButton
+            label={copied ? "Copied" : "Copy message"}
+            onClick={copy}
+          >
+            {copied ? (
+              <IconCheck className="h-3.5 w-3.5 text-signal-ok" />
+            ) : (
+              <IconCopy className="h-3.5 w-3.5" />
+            )}
+          </ActionButton>
+          {onResend && (
+            <ActionButton
+              label="Resend (regenerates everything after this message)"
+              onClick={onResend}
+              disabled={streaming}
+            >
+              <IconResend className="h-3.5 w-3.5" />
+            </ActionButton>
+          )}
+          <ActionButton label="Delete message" onClick={onDelete} danger>
+            <IconTrash className="h-3.5 w-3.5" />
+          </ActionButton>
+        </div>
+      </div>
     </div>
   );
+}
+
+function MetaLine({ meta }: { meta: NonNullable<Message["meta"]> }) {
+  const parts: string[] = [];
+  if (meta.tokensPerSecond) {
+    parts.push(`${meta.tokensPerSecond.toFixed(1)} tok/s`);
+  }
+  if (meta.completionTokens) {
+    parts.push(`${formatTokens(meta.completionTokens)} out`);
+  }
+  if (meta.promptTokens != null && meta.completionTokens != null) {
+    const used = meta.promptTokens + meta.completionTokens;
+    parts.push(
+      meta.contextSize
+        ? `ctx ${formatTokens(used)}/${formatTokens(meta.contextSize)}`
+        : `ctx ${formatTokens(used)}`
+    );
+  }
+  if (meta.durationMs) {
+    parts.push(`${(meta.durationMs / 1000).toFixed(1)}s`);
+  }
+  if (parts.length === 0) return null;
+  return <span>{parts.join(" · ")}</span>;
+}
+
+function ActionButton({
+  label,
+  onClick,
+  children,
+  danger,
+  disabled,
+}: {
+  label: string;
+  onClick: () => void;
+  children: React.ReactNode;
+  danger?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+      aria-label={label}
+      className={[
+        "rounded p-1 transition-colors disabled:opacity-30",
+        danger
+          ? "text-parchment-600 hover:bg-ink-800 hover:text-signal-err"
+          : "text-parchment-600 hover:bg-ink-800 hover:text-parchment-100",
+      ].join(" ")}
+    >
+      {children}
+    </button>
+  );
+}
+
+function formatTokens(n: number): string {
+  if (n >= 10000) return `${(n / 1000).toFixed(0)}k`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
 }

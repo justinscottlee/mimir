@@ -8,37 +8,39 @@ export default function ConversationsView() {
   const openConversation = useTalos((s) => s.openConversation);
   const deleteConversation = useTalos((s) => s.deleteConversation);
   const newConversation = useTalos((s) => s.newConversation);
+  const closeWindowByKind = useTalos((s) => s.closeWindowByKind);
 
   const list = Object.values(conversations).sort(
     (a, b) => b.updatedAt - a.updatedAt
   );
 
-  return (
-    <div className="mx-auto max-w-3xl px-6 py-10">
-      <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-bronze-500">
-        Library
-      </div>
-      <h1 className="mt-2 text-xl font-semibold">Conversations</h1>
+  function open(id: string) {
+    openConversation(id);
+    closeWindowByKind("conversations");
+  }
 
+  return (
+    <div className="p-4">
       {list.length === 0 ? (
-        <div className="mt-8 rounded-lg border border-dashed border-ink-700 p-8 text-center">
-          <p className="text-sm text-parchment-600">
-            No conversations yet.
-          </p>
+        <div className="rounded-lg border border-dashed border-ink-700 p-8 text-center">
+          <p className="text-sm text-parchment-600">No conversations yet.</p>
           <button
-            onClick={newConversation}
+            onClick={() => {
+              newConversation();
+              closeWindowByKind("conversations");
+            }}
             className="mt-4 rounded-md bg-bronze-500 px-4 py-2 text-sm font-medium text-ink-950 hover:bg-bronze-400"
           >
             New conversation
           </button>
         </div>
       ) : (
-        <ul className="mt-6 divide-y divide-ink-700 overflow-hidden rounded-lg border border-ink-700">
+        <ul className="divide-y divide-ink-700 overflow-hidden rounded-lg border border-ink-700">
           {list.map((c) => (
             <li
               key={c.id}
               className="group flex cursor-pointer items-center gap-3 bg-ink-900 px-4 py-3 transition-colors hover:bg-ink-850"
-              onClick={() => openConversation(c.id)}
+              onClick={() => open(c.id)}
             >
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm text-parchment-100">

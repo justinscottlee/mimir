@@ -7,13 +7,8 @@ import TabBar from "./TabBar";
 import SearchOverlay from "./SearchOverlay";
 import ChatView from "./views/ChatView";
 import WorkspaceView from "./views/WorkspaceView";
-import ConversationsView from "./views/ConversationsView";
-import WorkspacesView from "./views/WorkspacesView";
-import MemoriesView from "./views/MemoriesView";
-import SkillsView from "./views/SkillsView";
-import ToolsView from "./views/ToolsView";
-import SettingsView from "./views/SettingsView";
 import EmptyState from "./EmptyState";
+import { WindowLayer } from "./FloatingWindow";
 
 export default function AppShell() {
   // The store hydrates from localStorage on the client, so render the shell
@@ -43,26 +38,22 @@ export default function AppShell() {
   const active = tabs.find((t) => t.id === activeTabId) ?? null;
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="relative flex h-screen overflow-hidden">
       <Sidebar />
       <main className="flex min-w-0 flex-1 flex-col">
         <TabBar />
         <div className="min-h-0 flex-1 overflow-hidden">
           {!active && <EmptyState />}
-          {active?.kind === "chat" && active.refId && (
+          {active?.kind === "chat" && (
             <ChatView key={active.refId} conversationId={active.refId} />
           )}
-          {active?.kind === "workspace" && active.refId && (
+          {active?.kind === "workspace" && (
             <WorkspaceView key={active.refId} workspaceId={active.refId} />
           )}
-          {active?.kind === "conversations" && <ConversationsView />}
-          {active?.kind === "workspaces" && <WorkspacesView />}
-          {active?.kind === "memories" && <MemoriesView />}
-          {active?.kind === "skills" && <SkillsView />}
-          {active?.kind === "tools" && <ToolsView />}
-          {active?.kind === "settings" && <SettingsView />}
         </div>
       </main>
+      {/* Manager pages float above the shell as draggable windows. */}
+      <WindowLayer />
       <SearchOverlay />
     </div>
   );

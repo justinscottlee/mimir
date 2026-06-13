@@ -16,13 +16,12 @@ import {
 export default function Sidebar() {
   const newConversation = useTalos((s) => s.newConversation);
   const newWorkspace = useTalos((s) => s.newWorkspace);
-  const openTab = useTalos((s) => s.openTab);
+  const openWindow = useTalos((s) => s.openWindow);
   const setSearchOpen = useTalos((s) => s.setSearchOpen);
   const username = useTalos((s) => s.settings.username);
-  const tabs = useTalos((s) => s.tabs);
-  const activeTabId = useTalos((s) => s.activeTabId);
+  const windows = useTalos((s) => s.windows);
 
-  const activeKind = tabs.find((t) => t.id === activeTabId)?.kind;
+  const isOpen = (kind: string) => windows.some((w) => w.kind === kind);
 
   return (
     <aside className="flex w-56 shrink-0 flex-col border-r border-ink-700 bg-ink-900">
@@ -63,14 +62,14 @@ export default function Sidebar() {
         <SidebarButton
           label="Conversations"
           icon={<IconChat />}
-          active={activeKind === "conversations"}
-          onClick={() => openTab("conversations")}
+          active={isOpen("conversations")}
+          onClick={() => openWindow("conversations")}
         />
         <SidebarButton
           label="Workspaces"
           icon={<IconBox />}
-          active={activeKind === "workspaces"}
-          onClick={() => openTab("workspaces")}
+          active={isOpen("workspaces")}
+          onClick={() => openWindow("workspaces")}
         />
       </nav>
 
@@ -79,20 +78,20 @@ export default function Sidebar() {
         <SidebarButton
           label="Memories"
           icon={<IconMemory />}
-          active={activeKind === "memories"}
-          onClick={() => openTab("memories")}
+          active={isOpen("memories")}
+          onClick={() => openWindow("memories")}
         />
         <SidebarButton
           label="Skills"
           icon={<IconSkill />}
-          active={activeKind === "skills"}
-          onClick={() => openTab("skills")}
+          active={isOpen("skills")}
+          onClick={() => openWindow("skills")}
         />
         <SidebarButton
           label="Tools"
           icon={<IconTool />}
-          active={activeKind === "tools"}
-          onClick={() => openTab("tools")}
+          active={isOpen("tools")}
+          onClick={() => openWindow("tools")}
         />
       </nav>
 
@@ -107,7 +106,7 @@ export default function Sidebar() {
           {username}
         </span>
         <button
-          onClick={() => openTab("settings")}
+          onClick={() => openWindow("settings")}
           className="rounded-md p-1.5 text-parchment-600 transition-colors hover:bg-ink-800 hover:text-parchment-100"
           title="Settings"
           aria-label="Settings"

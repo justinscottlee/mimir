@@ -106,3 +106,23 @@ export const IconTrash = (p: IconProps) => (
     <path d="M2.5 4.5h11M6.5 2.5h3M5.5 4.5 6 13.5h4l.5-9" />
   </Svg>
 );
+
+export const IconCopy = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />
+    <path d="M3.5 10.5h-1v-8h8v1" />
+  </Svg>
+);
+
+export const IconCheck = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="m3 8.5 3.5 3.5L13 4.5" />
+  </Svg>
+);
+
+export const IconResend = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" />
+    <path d="M13.5 1.5v3h-3" />
+  </Svg>
+);

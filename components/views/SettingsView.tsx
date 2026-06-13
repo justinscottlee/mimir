@@ -35,13 +35,8 @@ export default function SettingsView() {
     endpoint.trim() !== settings.endpoint || username.trim() !== settings.username;
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-10">
-      <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-bronze-500">
-        Configuration
-      </div>
-      <h1 className="mt-2 text-xl font-semibold">Settings</h1>
-
-      <section className="mt-8">
+    <div className="p-5">
+      <section>
         <h2 className="text-sm font-medium text-parchment-100">
           llama.cpp endpoint
         </h2>
@@ -80,7 +75,7 @@ export default function SettingsView() {
         )}
       </section>
 
-      <section className="mt-10">
+      <section className="mt-8">
         <h2 className="text-sm font-medium text-parchment-100">Profile</h2>
         <p className="mt-1 text-sm text-parchment-600">
           Shown in the sidebar. Local only — there are no accounts.
@@ -93,7 +88,7 @@ export default function SettingsView() {
         />
       </section>
 
-      <div className="mt-10 flex items-center gap-3">
+      <div className="mt-8 flex items-center gap-3">
         <button
           onClick={save}
           disabled={!dirty}

@@ -47,9 +47,26 @@ from `/v1/chat/completions`.
 
 - Left sidebar: New conversation, New workspace, Search (⌘K), Conversations,
   Workspaces, Memories, Skills, Tools, and a profile footer with settings.
-- Main area: tab bar on top; tabs can be chats, workspaces, or any of the
-  manager pages. Manager pages are singletons — opening one twice focuses the
-  existing tab.
+- Main area: tab bar on top. Tabs are reserved for chats and workspaces —
+  drag to reorder, click the title of the active tab to rename it (renames
+  the underlying conversation/workspace too).
+- Manager pages (Conversations, Workspaces, Memories, Skills, Tools,
+  Settings) open as draggable floating windows: title top-left, close button
+  top-right, one window per kind. Positions persist across refreshes.
+
+## Chat features
+
+- Assistant messages render markdown (GFM): bold, tables, lists, blockquotes,
+  syntax-highlighted code blocks with per-block copy buttons.
+- Code blocks tagged `html`, `svg`, or `xml` get a Code/Preview toggle that
+  renders the artifact live in a sandboxed iframe (`sandbox="allow-scripts"`,
+  no same-origin access, so artifacts can't touch app state).
+- Generation stats under each assistant message: tok/s, output tokens,
+  context usage (vs. the server's n_ctx from `/props`), and wall time.
+  Server-reported usage/timings are preferred; falls back to client-side
+  estimates when the server doesn't report them.
+- Message actions on hover: copy and delete on every message; resend on user
+  messages (truncates everything after and regenerates).
 
 ## Stubs (intentionally unbuilt)
 
@@ -59,8 +76,8 @@ from `/v1/chat/completions`.
 
 ## Ideas for next steps
 
-1. Markdown + code-block rendering in chat (e.g. `react-markdown` + `shiki`)
-2. System prompt per conversation
-3. SQLite persistence (Drizzle or better-sqlite3) once data outgrows localStorage
-4. Generation params (temperature, top_p, max_tokens) in a per-chat drawer
+1. System prompt per conversation
+2. SQLite persistence (Drizzle or better-sqlite3) once data outgrows localStorage
+3. Generation params (temperature, top_p, max_tokens) in a per-chat drawer
+4. Window resizing + minimize-to-sidebar
 5. The workspace agent loop
