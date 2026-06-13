@@ -21,11 +21,23 @@ so you get immediate confirmation Mimir can reach it.
 Settings is split into sections (Models & Endpoints, System, Account). Under
 Models & Endpoints you can:
 
-- Add any number of llama.cpp endpoints, each with a friendly name and URL.
+- Add any number of endpoints, each with a friendly name and URL. Endpoints can
+  be local llama.cpp servers or hosted OpenAI-compatible APIs (Groq, OpenAI,
+  OpenRouter, Together, …). One-tap presets prefill the name and URL.
+- Give hosted endpoints an API key — sent as a bearer token, forwarded
+  server-side through Mimir's proxy so it never sits in a URL or the browser
+  console. Local llama.cpp servers need no key. Keys persist in localStorage
+  with the rest of settings.
 - Enable or disable individual models per endpoint — disabled ones disappear
   from every picker but stay one toggle away.
 - Pick a default model for new conversations and a separate default for new
   workspaces (or leave either on "first available").
+
+Hosted APIs work because both they and llama.cpp speak the OpenAI `/v1/models`
+and `/v1/chat/completions` shapes; the only difference is the `Authorization`
+header, which Mimir adds when a key is set. llama.cpp-only extras (the `/props`
+context size) degrade gracefully to "no context size" on providers that lack
+them.
 
 ### Running llama.cpp with multiple models
 
@@ -61,7 +73,9 @@ from `/v1/chat/completions`.
   Workspaces, Memories, Skills, Tools, and a profile footer with settings.
 - Main area: tab bar on top. Tabs are reserved for chats and workspaces —
   drag to reorder, click the title of the active tab to rename it (renames
-  the underlying conversation/workspace too).
+  the underlying conversation/workspace too). A "+" button at the right end of
+  the strip opens a small menu to start a New conversation or New workspace,
+  each of which opens as a new tab.
 - Manager pages (Conversations, Workspaces, Memories, Skills, Tools,
   Settings) open as draggable floating windows: title top-left, close button
   top-right, one window per kind. Positions persist across refreshes. Each

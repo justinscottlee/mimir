@@ -11,16 +11,21 @@ import { LlamaModel, MessageMeta, Role } from "./types";
  *   GET  /props                -> server properties incl. n_ctx (llama.cpp only)
  */
 
-function headers(endpoint: string): HeadersInit {
-  return {
+function headers(endpoint: string, apiKey?: string): HeadersInit {
+  const h: Record<string, string> = {
     "Content-Type": "application/json",
     "x-llama-base": endpoint,
   };
+  if (apiKey) h["x-llama-key"] = apiKey;
+  return h;
 }
 
-export async function listModels(endpoint: string): Promise<LlamaModel[]> {
+export async function listModels(
+  endpoint: string,
+  apiKey?: string
+): Promise<LlamaModel[]> {
   const res = await fetch("/api/llama/v1/models", {
-    headers: headers(endpoint),
+    headers: headers(endpoint, apiKey),
   });
   if (!res.ok) {
     throw new Error(`Endpoint responded ${res.status}`);
@@ -41,10 +46,13 @@ export async function listModels(endpoint: string): Promise<LlamaModel[]> {
 
 /** Reads the server context size from llama.cpp's /props, if available. */
 export async function fetchContextSize(
-  endpoint: string
+  endpoint: string,
+  apiKey?: string
 ): Promise<number | null> {
   try {
-    const res = await fetch("/api/llama/props", { headers: headers(endpoint) });
+    const res = await fetch("/api/llama/props", {
+      headers: headers(endpoint, apiKey),
+    });
     if (!res.ok) return null;
     const json = await res.json();
     return (
@@ -87,6 +95,8 @@ export interface ApiMessage {
 
 export interface ChatParams {
   endpoint: string;
+  /** Bearer token for hosted APIs; omitted for local llama.cpp. */
+  apiKey?: string;
   model: string;
   messages: ApiMessage[];
   /** Optional system text prepended ahead of the conversation. */
@@ -109,14 +119,14 @@ export interface ChatResult extends MessageMeta {
  * stream ends.
  */
 export async function streamChat(
-  { endpoint, model, messages, system, tools, signal }: ChatParams,
+  { endpoint, apiKey, model, messages, system, tools, signal }: ChatParams,
   onToken: (accumulated: string) => void
 ): Promise<ChatResult> {
   const started = performance.now();
 
   const res = await fetch("/api/llama/v1/chat/completions", {
     method: "POST",
-    headers: headers(endpoint),
+    headers: headers(endpoint, apiKey),
     signal,
     body: JSON.stringify({
       model,

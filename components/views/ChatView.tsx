@@ -94,7 +94,9 @@ export default function ChatView({ conversationId }: { conversationId: string })
     const resolved = resolveModelKey(conversation?.model, settings);
     if (!resolved) return;
     let cancelled = false;
-    fetchContextSize(resolved.url).then((n) => !cancelled && setContextSize(n));
+    fetchContextSize(resolved.url, resolved.apiKey).then(
+      (n) => !cancelled && setContextSize(n)
+    );
     return () => {
       cancelled = true;
     };
@@ -180,6 +182,7 @@ export default function ChatView({ conversationId }: { conversationId: string })
         const result = await runToolLoop(
           {
             endpoint: resolved.url,
+            apiKey: resolved.apiKey,
             model: resolved.modelId,
             messages: history.map((m) => ({ role: m.role, content: m.content })),
             system,

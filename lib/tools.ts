@@ -23,6 +23,8 @@ export type ChatMessage = ApiMessage;
 
 export interface RunLoopParams {
   endpoint: string;
+  /** Bearer token for hosted APIs; omitted for local llama.cpp. */
+  apiKey?: string;
   model: string;
   /** Conversation so far (user/assistant/system), excluding the system prefix. */
   messages: ChatMessage[];
@@ -79,6 +81,7 @@ export interface RunLoopResult {
 export async function runToolLoop(
   {
     endpoint,
+    apiKey,
     model,
     messages,
     system,
@@ -103,6 +106,7 @@ export async function runToolLoop(
     const result = await streamChat(
       {
         endpoint,
+        apiKey,
         model,
         // Pass full messages so tool_calls / tool_call_id linkage survives.
         messages: working,

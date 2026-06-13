@@ -94,13 +94,18 @@ export interface Workspace {
   createdAt: number;
 }
 
-/** A configured llama.cpp server. */
+/** A configured llama.cpp server or OpenAI-compatible API endpoint. */
 export interface Endpoint {
   id: string;
-  /** Friendly label shown in the UI, e.g. "Workstation" or "Home server". */
+  /** Friendly label shown in the UI, e.g. "Workstation" or "Groq". */
   name: string;
-  /** Base URL, e.g. http://192.168.1.50:8080 */
+  /** Base URL, e.g. http://192.168.1.50:8080 or https://api.groq.com/openai/v1 */
   url: string;
+  /**
+   * Bearer token for hosted APIs (Groq, OpenAI, …). Omitted for local
+   * llama.cpp servers, which need no auth. Stored locally like all settings.
+   */
+  apiKey?: string;
 }
 
 /**

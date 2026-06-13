@@ -89,8 +89,8 @@ function ModelsSection() {
     <div className="p-5">
       <SectionHeading
         title="Endpoints"
-        subtitle="llama.cpp servers Mimir can reach. Each can host multiple models."
-      />
+        subtitle="Local llama.cpp servers or hosted OpenAI-compatible APIs (Groq, OpenAI, …). Add a key for hosted providers; local servers need none."
+      />        
 
       <div className="mt-4 flex flex-col gap-3">
         {settings.endpoints.map((ep) => {
@@ -101,6 +101,7 @@ function ModelsSection() {
               id={ep.id}
               name={ep.name}
               url={ep.url}
+              apiKey={ep.apiKey}
               status={
                 loading
                   ? "loading"
@@ -115,7 +116,7 @@ function ModelsSection() {
             />
           );
         })}
-        <AddEndpoint onAdd={(name, url) => addEndpoint(name, url)} />
+        <AddEndpoint onAdd={(name, url, apiKey) => addEndpoint(name, url, apiKey)} />
       </div>
 
       <div className="mt-8 flex items-center justify-between">
@@ -212,9 +213,54 @@ function ModelsSection() {
   );
 }
 
+/** OpenAI-compatible providers, for one-tap prefill in the add row. */
+const PRESETS: { label: string; name: string; url: string; needsKey: boolean }[] = [
+  { label: "llama.cpp", name: "Local", url: "http://localhost:8080", needsKey: false },
+  { label: "Groq", name: "Groq", url: "https://api.groq.com/openai/v1", needsKey: true },
+  { label: "OpenAI", name: "OpenAI", url: "https://api.openai.com/v1", needsKey: true },
+  { label: "OpenRouter", name: "OpenRouter", url: "https://openrouter.ai/api/v1", needsKey: true },
+  { label: "Together", name: "Together", url: "https://api.together.xyz/v1", needsKey: true },
+];
+
+/** Password-style input with a show/hide toggle, for API keys. */
+function KeyField({
+  value,
+  onChange,
+  placeholder = "API key (optional for local servers)",
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="flex flex-1 items-center gap-2 rounded-md border border-ink-700 bg-ink-850 px-2.5 py-1.5 focus-within:border-bronze-600">
+      <input
+        type={show ? "text" : "password"}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        spellCheck={false}
+        autoComplete="off"
+        className="min-w-0 flex-1 bg-transparent font-mono text-xs text-parchment-100 placeholder:text-parchment-600 focus:outline-none"
+      />
+      {value && (
+        <button
+          type="button"
+          onClick={() => setShow((s) => !s)}
+          className="shrink-0 text-[10px] uppercase tracking-wide text-parchment-600 hover:text-parchment-100"
+        >
+          {show ? "hide" : "show"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function EndpointCard({
   name,
   url,
+  apiKey,
   status,
   error,
   onChange,
@@ -224,9 +270,10 @@ function EndpointCard({
   id: string;
   name: string;
   url: string;
+  apiKey?: string;
   status: string;
   error: boolean;
-  onChange: (patch: { name?: string; url?: string }) => void;
+  onChange: (patch: { name?: string; url?: string; apiKey?: string }) => void;
   onRemove: () => void;
   canRemove: boolean;
 }) {
@@ -255,53 +302,96 @@ function EndpointCard({
           />
         )}
       </div>
+      <div className="mt-2 flex items-center gap-2">
+        <KeyField
+          value={apiKey ?? ""}
+          onChange={(v) => onChange({ apiKey: v })}
+        />
+      </div>
       <div
         className={[
-          "mt-2 font-mono text-[11px]",
+          "mt-2 flex items-center gap-2 font-mono text-[11px]",
           error ? "text-signal-err" : "text-parchment-600",
         ].join(" ")}
       >
-        {status}
+        {apiKey && (
+          <span className="rounded bg-bronze-600/20 px-1.5 py-0.5 text-[10px] text-bronze-300">
+            API · keyed
+          </span>
+        )}
+        <span>{status}</span>
       </div>
     </div>
   );
 }
 
-function AddEndpoint({ onAdd }: { onAdd: (name: string, url: string) => void }) {
+function AddEndpoint({
+  onAdd,
+}: {
+  onAdd: (name: string, url: string, apiKey?: string) => void;
+}) {
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
+  const [apiKey, setApiKey] = useState("");
+
+  function applyPreset(p: (typeof PRESETS)[number]) {
+    setName(p.name);
+    setUrl(p.url);
+    if (!p.needsKey) setApiKey("");
+  }
 
   function add() {
     if (!url.trim()) return;
-    onAdd(name.trim() || "Endpoint", url.trim());
+    onAdd(name.trim() || "Endpoint", url.trim(), apiKey.trim() || undefined);
     setName("");
     setUrl("");
+    setApiKey("");
   }
 
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-dashed border-ink-700 p-3">
-      <input
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        placeholder="Name"
-        className="w-36 rounded-md border border-ink-700 bg-ink-850 px-2.5 py-1.5 text-sm text-parchment-100 placeholder:text-parchment-600 focus:border-bronze-600 focus:outline-none"
-      />
-      <input
-        value={url}
-        onChange={(e) => setUrl(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && add()}
-        placeholder="http://192.168.1.50:8080"
-        spellCheck={false}
-        className="flex-1 rounded-md border border-ink-700 bg-ink-850 px-2.5 py-1.5 font-mono text-xs text-parchment-100 placeholder:text-parchment-600 focus:border-bronze-600 focus:outline-none"
-      />
-      <button
-        onClick={add}
-        disabled={!url.trim()}
-        className="flex items-center gap-1.5 rounded-md bg-bronze-500 px-3 py-1.5 text-sm font-medium text-ink-950 transition-colors hover:bg-bronze-400 disabled:opacity-30"
-      >
-        <IconPlus className="h-3.5 w-3.5" />
-        Add
-      </button>
+    <div className="rounded-lg border border-dashed border-ink-700 p-3">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="mr-1 text-[11px] text-parchment-600">Preset:</span>
+        {PRESETS.map((p) => (
+          <button
+            key={p.label}
+            type="button"
+            onClick={() => applyPreset(p)}
+            className="rounded-md border border-ink-700 px-2 py-0.5 text-[11px] text-parchment-400 transition-colors hover:bg-ink-800 hover:text-parchment-100"
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-2 flex items-center gap-2">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Name"
+          className="w-36 rounded-md border border-ink-700 bg-ink-850 px-2.5 py-1.5 text-sm text-parchment-100 placeholder:text-parchment-600 focus:border-bronze-600 focus:outline-none"
+        />
+        <input
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && add()}
+          placeholder="http://192.168.1.50:8080 or https://api.groq.com/openai/v1"
+          spellCheck={false}
+          className="flex-1 rounded-md border border-ink-700 bg-ink-850 px-2.5 py-1.5 font-mono text-xs text-parchment-100 placeholder:text-parchment-600 focus:border-bronze-600 focus:outline-none"
+        />
+      </div>
+
+      <div className="mt-2 flex items-center gap-2">
+        <KeyField value={apiKey} onChange={setApiKey} />
+        <button
+          onClick={add}
+          disabled={!url.trim()}
+          className="flex items-center gap-1.5 rounded-md bg-bronze-500 px-3 py-1.5 text-sm font-medium text-ink-950 transition-colors hover:bg-bronze-400 disabled:opacity-30"
+        >
+          <IconPlus className="h-3.5 w-3.5" />
+          Add
+        </button>
+      </div>
     </div>
   );
 }

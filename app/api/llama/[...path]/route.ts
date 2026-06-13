@@ -27,10 +27,18 @@ async function proxy(req: NextRequest, path: string[]) {
     );
   }
 
+  // Hosted APIs (Groq, OpenAI, …) need a bearer token; local llama.cpp doesn't.
+  // The key rides in a separate header so it never lands in a URL or a log.
+  const apiKey = req.headers.get("x-llama-key");
+  const outHeaders: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (apiKey) outHeaders["Authorization"] = `Bearer ${apiKey}`;
+
   try {
     const upstream = await fetch(target, {
       method: req.method,
-      headers: { "Content-Type": "application/json" },
+      headers: outHeaders,
       body: req.method === "GET" || req.method === "HEAD" ? undefined : req.body,
       // @ts-expect-error - duplex is required by undici for streaming bodies
       duplex: "half",
@@ -46,7 +54,7 @@ async function proxy(req: NextRequest, path: string[]) {
     });
   } catch {
     return Response.json(
-      { error: `Could not reach ${base}. Is the llama.cpp server running?` },
+      { error: `Could not reach ${base}. Is the server running and reachable?` },
       { status: 502 }
     );
   }

@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMimir } from "@/lib/store";
-import { IconClose } from "./icons";
+import { IconBox, IconChat, IconClose, IconPlus } from "./icons";
 
 export default function TabBar() {
   const tabs = useMimir((s) => s.tabs);
@@ -15,10 +15,6 @@ export default function TabBar() {
   const [dragId, setDragId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
-
-  if (tabs.length === 0) {
-    return <div className="h-10 border-b border-ink-700 bg-ink-900" />;
-  }
 
   function commitRename(tabId: string) {
     renameTabRef(tabId, draft);
@@ -42,7 +38,6 @@ export default function TabBar() {
               e.dataTransfer.effectAllowed = "move";
             }}
             onDragEnter={() => {
-              // Live-reorder as the dragged tab passes over others.
               if (dragId && dragId !== tab.id) moveTabBefore(dragId, tab.id);
             }}
             onDragOver={(e) => e.preventDefault()}
@@ -82,7 +77,6 @@ export default function TabBar() {
                 className="truncate"
                 title={active ? "Click to rename" : tab.title}
                 onClick={(e) => {
-                  // Clicking the title of the already-active tab starts a rename.
                   if (active) {
                     e.stopPropagation();
                     setDraft(tab.title);
@@ -106,6 +100,100 @@ export default function TabBar() {
           </div>
         );
       })}
+
+      <NewTabButton />
     </div>
+  );
+}
+
+/** "+" button at the right of the strip with a New conversation/workspace menu. */
+function NewTabButton() {
+  const newConversation = useMimir((s) => s.newConversation);
+  const newWorkspace = useMimir((s) => s.newWorkspace);
+
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={wrapRef} className="relative mb-1 ml-0.5 shrink-0">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-label="New tab"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="New tab"
+        className={[
+          "flex h-7 w-7 items-center justify-center rounded-md transition-colors",
+          open
+            ? "bg-ink-800 text-parchment-100"
+            : "text-parchment-600 hover:bg-ink-850 hover:text-parchment-100",
+        ].join(" ")}
+      >
+        <IconPlus className="h-4 w-4" />
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          className="absolute left-0 top-9 z-50 w-52 overflow-hidden rounded-lg border border-ink-700 bg-ink-900 py-1 shadow-[0_12px_32px_rgba(0,0,0,0.5)]"
+        >
+          <MenuItem
+            icon={<IconChat className="h-4 w-4" />}
+            label="New conversation"
+            onClick={() => {
+              newConversation();
+              setOpen(false);
+            }}
+          />
+          <MenuItem
+            icon={<IconBox className="h-4 w-4" />}
+            label="New workspace"
+            onClick={() => {
+              newWorkspace();
+              setOpen(false);
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MenuItem({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      role="menuitem"
+      onClick={onClick}
+      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-parchment-400 transition-colors hover:bg-ink-800 hover:text-parchment-100"
+    >
+      <span className="text-parchment-600">{icon}</span>
+      {label}
+    </button>
   );
 }

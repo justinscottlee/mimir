@@ -107,7 +107,7 @@ interface MimirState {
 
   // Settings / UI
   setSettings: (patch: Partial<Settings>) => void;
-  addEndpoint: (name: string, url: string) => string;
+  addEndpoint: (name: string, url: string, apiKey?: string) => string;
   updateEndpoint: (id: string, patch: Partial<Omit<Endpoint, "id">>) => void;
   removeEndpoint: (id: string) => void;
   setModelDisabled: (modelKey: string, disabled: boolean) => void;
@@ -548,14 +548,19 @@ export const useMimir = create<MimirState>()(
       setSettings: (patch) =>
         set((s) => ({ settings: { ...s.settings, ...patch } })),
 
-      addEndpoint: (name, url) => {
+      addEndpoint: (name, url, apiKey) => {
         const id = uid("ep_");
         set((s) => ({
           settings: {
             ...s.settings,
             endpoints: [
               ...s.settings.endpoints,
-              { id, name: name.trim() || "Endpoint", url: url.trim() },
+              {
+                id,
+                name: name.trim() || "Endpoint",
+                url: url.trim(),
+                apiKey: apiKey?.trim() || undefined,
+              },
             ],
           },
         }));
