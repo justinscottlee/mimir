@@ -76,6 +76,15 @@ export default function Markdown({ content }: { content: string }) {
               </a>
             );
           },
+          // Tables can be wider than the chat column; give them their own
+          // horizontal scroll so they never push the message bubble wider.
+          table({ children }) {
+            return (
+              <div className="md-table-scroll">
+                <table>{children}</table>
+              </div>
+            );
+          },
         }}
       >
         {content}

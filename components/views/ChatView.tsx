@@ -333,7 +333,7 @@ function MessageRow({
     >
       <div
         className={[
-          "max-w-[88%] rounded-lg px-4 py-2.5",
+          "max-w-[88%] min-w-0 rounded-lg px-4 py-2.5",
           isUser
             ? "whitespace-pre-wrap bg-bronze-600/20 text-sm leading-relaxed text-parchment-100"
             : "w-full border border-ink-700 bg-ink-900 text-parchment-100",

@@ -51,6 +51,9 @@ body {
 }
 
 /* Markdown typography inside chat messages */
+.md {
+  min-width: 0;
+}
 .md > *:first-child {
   margin-top: 0;
 }
@@ -109,9 +112,13 @@ body {
   font-weight: 600;
   color: theme("colors.parchment.100");
 }
-.md table {
+.md-table-scroll {
   margin: 0.75rem 0;
-  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.md table {
+  width: auto;
   border-collapse: collapse;
   font-size: 0.85rem;
 }
@@ -120,6 +127,7 @@ body {
   border: 1px solid theme("colors.ink.700");
   padding: 0.4rem 0.7rem;
   text-align: left;
+  white-space: nowrap;
 }
 .md th {
   background: theme("colors.ink.850");
