@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { uid, useTalos } from "@/lib/store";
-import { fetchContextSize, listModels, streamChat } from "@/lib/llama";
+import { fetchContextSize, listModels } from "@/lib/llama";
 import { LlamaModel, Message } from "@/lib/types";
-import { buildMemoryPrompt, MEMORY_TOOLS, parseRememberArgs } from "@/lib/memory";
+import { buildMemoryPrompt, rememberTool } from "@/lib/memory";
+import { runToolLoop, ToolEvent, ToolRegistry } from "@/lib/tools";
 import { IconCheck, IconCopy, IconResend, IconSend, IconStop, IconTrash } from "../icons";
 import Markdown from "../Markdown";
 
@@ -30,6 +31,7 @@ export default function ChatView({ conversationId }: { conversationId: string })
   const [savedNotice, setSavedNotice] = useState<string[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // Fetch available models and the server context size.
   useEffect(() => {
@@ -56,6 +58,14 @@ export default function ChatView({ conversationId }: { conversationId: string })
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [conversation?.messages]);
+
+  // Auto-grow the input to fit its content (capped by max-height in CSS).
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [input]);
 
   if (!conversation) {
     return (
@@ -89,53 +99,52 @@ export default function ChatView({ conversationId }: { conversationId: string })
 
     try {
       const memoryPrompt = buildMemoryPrompt(Object.values(memories));
-      const result = await streamChat(
+
+      // Build the tool registry. The remember handler is wired to the store so
+      // Talos owns the write; the model only expresses intent. New tools
+      // (web_search, file ops, …) register here and the loop handles them
+      // unchanged.
+      const savedThisRun: string[] = [];
+      const registry: ToolRegistry = {
+        remember: rememberTool((content, category) => {
+          addMemory(content, { category, source: "auto" });
+          savedThisRun.push(content);
+        }),
+      };
+
+      const result = await runToolLoop(
         {
           endpoint,
           model: current.model,
           messages: history.map((m) => ({ role: m.role, content: m.content })),
           system: memoryPrompt ?? undefined,
-          tools: MEMORY_TOOLS,
+          registry,
           signal: controller.signal,
         },
+        // Streams the current round's text into the assistant bubble.
         (accumulated) =>
           patchMessage(conversationId, assistantMessage.id, {
             content: accumulated,
-          })
+          }),
+        // Fired after each tool runs — used here only to surface the banner.
+        (event: ToolEvent) => void event
       );
 
-      // Handle any `remember` tool calls the model emitted. Talos owns the
-      // write — the model only expressed intent. Each save is visible and
-      // reversible in the Memories window.
-      const saved: string[] = [];
-      for (const call of result.toolCalls) {
-        if (call.name !== "remember") continue;
-        const args = parseRememberArgs(call.arguments);
-        if (args) {
-          addMemory(args.content, { category: args.category, source: "auto" });
-          saved.push(args.content);
-        }
-      }
-      if (saved.length > 0) setSavedNotice(saved);
+      if (savedThisRun.length > 0) setSavedNotice(savedThisRun);
 
-      // If the model produced no prose (pure tool call), leave a short note so
-      // the turn isn't an empty bubble.
+      // Commit the model's final prose. If it ended on a tool call with no
+      // closing prose, leave a short note rather than an empty bubble.
       const finalContent =
-        useTalos.getState().conversations[conversationId]?.messages.find(
-          (m) => m.id === assistantMessage.id
-        )?.content ?? "";
-      if (!finalContent.trim() && saved.length > 0) {
-        patchMessage(conversationId, assistantMessage.id, {
-          content: `_Saved ${saved.length} ${
-            saved.length === 1 ? "memory" : "memories"
-          }._`,
-        });
-      }
+        result.content.trim() ||
+        (savedThisRun.length > 0
+          ? `_Saved ${savedThisRun.length} ${
+              savedThisRun.length === 1 ? "memory" : "memories"
+            }._`
+          : "");
 
-      const { toolCalls, ...meta } = result;
-      void toolCalls;
       patchMessage(conversationId, assistantMessage.id, {
-        meta: { ...meta, contextSize: contextSize ?? undefined },
+        content: finalContent,
+        meta: { ...result.meta, contextSize: contextSize ?? undefined },
       });
     } catch (e) {
       if ((e as Error).name !== "AbortError") {
@@ -224,7 +233,7 @@ export default function ChatView({ conversationId }: { conversationId: string })
 
       {/* Messages */}
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex max-w-3xl flex-col gap-6 px-5 py-6">
+        <div className="mx-auto flex max-w-4xl flex-col gap-6 px-5 py-6">
           {conversation.messages.length === 0 && (
             <p className="pt-16 text-center text-sm text-parchment-600">
               Send a message to begin. The full conversation is kept on this
@@ -262,9 +271,10 @@ export default function ChatView({ conversationId }: { conversationId: string })
       </div>
 
       {/* Input */}
-      <div className="border-t border-ink-700 px-5 py-4">
-        <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-lg border border-ink-700 bg-ink-850 p-2 focus-within:border-bronze-600">
+      <div className="px-5 pb-5 pt-1">
+        <div className="mx-auto flex max-w-4xl items-end gap-2 rounded-xl border border-ink-700 bg-ink-850 px-3 py-2 focus-within:border-bronze-600">
           <textarea
+            ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -273,14 +283,14 @@ export default function ChatView({ conversationId }: { conversationId: string })
                 send();
               }
             }}
-            rows={Math.min(6, Math.max(1, input.split("\n").length))}
+            rows={1}
             placeholder="Message the model… (Enter to send, Shift+Enter for a new line)"
-            className="max-h-48 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-parchment-100 placeholder:text-parchment-600 focus:outline-none"
+            className="max-h-72 min-h-[2.5rem] flex-1 resize-none bg-transparent px-1 py-2 text-sm leading-relaxed text-parchment-100 placeholder:text-parchment-600 focus:outline-none"
           />
           {streaming ? (
             <button
               onClick={stop}
-              className="flex h-8 w-8 items-center justify-center rounded-md bg-ink-700 text-parchment-100 transition-colors hover:bg-ink-800"
+              className="mb-1 flex h-9 w-9 items-center justify-center rounded-lg bg-ink-700 text-parchment-100 transition-colors hover:bg-ink-800"
               title="Stop generating"
               aria-label="Stop generating"
             >
@@ -290,7 +300,7 @@ export default function ChatView({ conversationId }: { conversationId: string })
             <button
               onClick={send}
               disabled={!input.trim()}
-              className="flex h-8 w-8 items-center justify-center rounded-md bg-bronze-500 text-ink-950 transition-colors hover:bg-bronze-400 disabled:opacity-30"
+              className="mb-1 flex h-9 w-9 items-center justify-center rounded-lg bg-bronze-500 text-ink-950 transition-colors hover:bg-bronze-400 disabled:opacity-30"
               title="Send"
               aria-label="Send"
             >

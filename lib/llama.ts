@@ -62,10 +62,23 @@ export interface ToolCall {
   arguments: string;
 }
 
+/** A message in the OpenAI chat format, including tool-call linkage. */
+export interface ApiMessage {
+  role: Role | "tool";
+  content: string;
+  tool_calls?: {
+    id: string;
+    type: "function";
+    function: { name: string; arguments: string };
+  }[];
+  tool_call_id?: string;
+  name?: string;
+}
+
 export interface ChatParams {
   endpoint: string;
   model: string;
-  messages: { role: Role; content: string }[];
+  messages: ApiMessage[];
   /** Optional system text prepended ahead of the conversation. */
   system?: string;
   /** Tools advertised to the model (OpenAI function-calling format). */
@@ -74,6 +87,8 @@ export interface ChatParams {
 }
 
 export interface ChatResult extends MessageMeta {
+  /** The full assistant text produced this completion. */
+  content: string;
   /** Any tool calls the model emitted during this completion. */
   toolCalls: ToolCall[];
 }
@@ -182,6 +197,7 @@ export async function streamChat(
   );
 
   return {
+    content: accumulated,
     promptTokens,
     completionTokens,
     tokensPerSecond,

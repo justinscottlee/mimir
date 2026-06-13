@@ -1,4 +1,5 @@
 import { Memory } from "./types";
+import { ToolHandler } from "./tools";
 
 /**
  * How memories reach the model — two directions:
@@ -86,4 +87,25 @@ export function parseRememberArgs(
   } catch {
     return null;
   }
+}
+
+/**
+ * Builds the `remember` registry entry. The handler is given a `save`
+ * callback (wired to the store's addMemory in ChatView) so this module stays
+ * free of store imports and the write stays owned by Talos, not the model.
+ */
+export function rememberTool(
+  save: (content: string, category?: string) => void
+): ToolHandler {
+  return {
+    def: MEMORY_TOOLS[0],
+    run: (args) => {
+      const content = typeof args.content === "string" ? args.content.trim() : "";
+      if (!content) return "Error: a non-empty 'content' is required.";
+      const category =
+        typeof args.category === "string" ? args.category.trim() : undefined;
+      save(content, category);
+      return `Saved memory${category ? ` under "${category}"` : ""}: "${content}"`;
+    },
+  };
 }

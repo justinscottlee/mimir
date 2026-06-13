@@ -85,12 +85,30 @@ model:
 - **Read (injection).** Before each completion, enabled memories are grouped
   by category and prepended as a system message. The model just "knows" them.
 - **Write (tool call).** Each request advertises a `remember` function tool.
-  When the model judges a fact worth keeping, it calls the tool; Talos
-  intercepts the call, stores the memory (marked `auto`), and shows a "saved
-  N memories" banner linking to the manager. The model never writes storage
+  When the model judges a fact worth keeping, it calls the tool; the tool
+  loop (see below) runs it, stores the memory (marked `auto`), feeds the
+  result back to the model, and lets it continue its reply. A "saved N
+  memories" banner links to the manager. The model never writes storage
   directly — it emits intent, Talos owns the mutation, every write is visible
   and reversible. Models without function-calling simply never call it and
   only the injection path runs (graceful degradation).
+
+## Tool loop
+
+`lib/tools.ts` drives the full OpenAI tool-use protocol within a single
+response. `runToolLoop` streams a completion; if the model emitted tool
+calls, it runs each handler, appends the assistant tool-call message and a
+`tool`-role result message (with proper `tool_call_id` linkage), and loops —
+until the model replies with prose and no calls, or a round cap (default 5)
+is hit. `onText` streams the current round's tokens; `onToolEvent` fires
+after each tool runs.
+
+Tools live in a registry: `{ name -> { def, run } }`. `def` is the schema
+advertised to the model; `run(args)` executes and returns a string fed back
+as the result. Adding a capability — web search, file read/write — means
+adding one registry entry; the loop is tool-agnostic and unchanged. `remember`
+is the first entry (`rememberTool` in `lib/memory.ts`), wired to the store so
+the write stays owned by Talos.
 
 Manage them in the Memories window: add, edit (click the text), toggle
 on/off (checkbox), delete. `lib/memory.ts` is the single source for both the
