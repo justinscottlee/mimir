@@ -28,6 +28,16 @@ export interface FloatingWindow {
   z: number;
 }
 
+/** Size constraints per window kind for resizing. */
+export interface WindowSizeSpec {
+  defaultW: number;
+  defaultH: number;
+  minW: number;
+  minH: number;
+  maxW: number;
+  maxH: number;
+}
+
 export type Role = "system" | "user" | "assistant";
 
 /** Generation stats captured from llama.cpp after a completion. */
@@ -48,6 +58,10 @@ export interface Message {
   content: string;
   createdAt: number;
   meta?: MessageMeta;
+  /** Model key (endpointId::modelId) that produced an assistant message. */
+  model?: string;
+  /** True if generation was manually stopped before completing. */
+  interrupted?: boolean;
   /**
    * Tool calls executed while producing this message, indexed to match the
    * ⟦tool:N⟧ markers embedded in `content`. Lets the chat render tool chips
@@ -76,12 +90,48 @@ export interface Conversation {
 export interface Workspace {
   id: string;
   name: string;
+  model?: string;
   createdAt: number;
 }
 
+/** A configured llama.cpp server. */
+export interface Endpoint {
+  id: string;
+  /** Friendly label shown in the UI, e.g. "Workstation" or "Home server". */
+  name: string;
+  /** Base URL, e.g. http://192.168.1.50:8080 */
+  url: string;
+}
+
+/**
+ * A fully-qualified model reference: which endpoint, which model id on it.
+ * Serialized as `${endpointId}::${modelId}` for use as a stable key/value in
+ * selects and the disabled set.
+ */
+export interface ModelRef {
+  endpointId: string;
+  modelId: string;
+}
+
+export function modelKey(endpointId: string, modelId: string): string {
+  return `${endpointId}::${modelId}`;
+}
+
+export function parseModelKey(key: string): ModelRef | null {
+  const idx = key.indexOf("::");
+  if (idx === -1) return null;
+  return { endpointId: key.slice(0, idx), modelId: key.slice(idx + 2) };
+}
+
 export interface Settings {
-  /** Base URL of a llama.cpp server, e.g. http://192.168.1.50:8080 */
-  endpoint: string;
+  /** Configured llama.cpp servers. */
+  endpoints: Endpoint[];
+  /** Model keys (endpointId::modelId) that are hidden from pickers. */
+  disabledModels: string[];
+  /** Default model key for new conversations. */
+  defaultConversationModel?: string;
+  /** Default model key for new workspaces. */
+  defaultWorkspaceModel?: string;
   username: string;
 }
 
@@ -136,4 +186,18 @@ export interface Skill {
 
 export interface LlamaModel {
   id: string;
+  /** Optional metadata surfaced by some llama.cpp builds via /v1/models. */
+  contextLength?: number;
+  /** Owner/creator field if reported. */
+  ownedBy?: string;
+}
+
+/** A model paired with the endpoint it lives on, for pickers. */
+export interface ResolvedModel {
+  key: string;
+  endpointId: string;
+  endpointName: string;
+  modelId: string;
+  contextLength?: number;
+  ownedBy?: string;
 }

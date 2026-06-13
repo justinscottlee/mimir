@@ -1,9 +1,16 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { uid, useMimir } from "@/lib/store";
-import { fetchContextSize, listModels } from "@/lib/llama";
-import { LlamaModel, Message, ToolEventRecord } from "@/lib/types";
+import { fetchContextSize } from "@/lib/llama";
+import {
+  EndpointLoad,
+  loadAllModels,
+  resolveEnabledModels,
+  resolveModelKey,
+  describeModelKey,
+} from "@/lib/models";
+import { Message, ResolvedModel, ToolEventRecord } from "@/lib/types";
 import { buildMemoryPrompt, rememberTool } from "@/lib/memory";
 import { buildSkillsPrompt, loadSkillTool } from "@/lib/skills";
 import { runToolLoop, ToolEvent, ToolRegistry } from "@/lib/tools";
@@ -18,11 +25,12 @@ import {
   IconStop,
   IconTrash,
 } from "../icons";
+import ConfirmDelete from "../ConfirmDelete";
 import Markdown from "../Markdown";
 
 export default function ChatView({ conversationId }: { conversationId: string }) {
   const conversation = useMimir((s) => s.conversations[conversationId]);
-  const endpoint = useMimir((s) => s.settings.endpoint);
+  const settings = useMimir((s) => s.settings);
   const appendMessage = useMimir((s) => s.appendMessage);
   const patchMessage = useMimir((s) => s.patchMessage);
   const deleteMessage = useMimir((s) => s.deleteMessage);
@@ -30,49 +38,75 @@ export default function ChatView({ conversationId }: { conversationId: string })
   const setConversationModel = useMimir((s) => s.setConversationModel);
   const setConversationTitle = useMimir((s) => s.setConversationTitle);
   const openWindow = useMimir((s) => s.openWindow);
-  const memories = useMimir((s) => s.memories);
   const addMemory = useMimir((s) => s.addMemory);
-  const skills = useMimir((s) => s.skills);
 
-  const [models, setModels] = useState<LlamaModel[]>([]);
-  const [modelsError, setModelsError] = useState<string | null>(null);
+  const [loads, setLoads] = useState<EndpointLoad[]>([]);
+  const [loadingModels, setLoadingModels] = useState(true);
   const [contextSize, setContextSize] = useState<number | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Fetch available models and the server context size.
+  const streamingRef = useRef(false);
+  useEffect(() => {
+    streamingRef.current = streaming;
+  }, [streaming]);
+
+  const models = useMemo(
+    () => resolveEnabledModels(loads, settings.disabledModels),
+    [loads, settings.disabledModels]
+  );
+
+  const endpointsKey = settings.endpoints.map((e) => e.id + e.url).join("|");
   useEffect(() => {
     let cancelled = false;
-    setModelsError(null);
-    listModels(endpoint)
-      .then((m) => {
-        if (cancelled) return;
-        setModels(m);
-        const current = useMimir.getState().conversations[conversationId];
-        if (m.length > 0 && !current?.model) {
-          setConversationModel(conversationId, m[0].id);
-        }
-      })
-      .catch((e) => !cancelled && setModelsError(e.message));
-    fetchContextSize(endpoint).then((n) => !cancelled && setContextSize(n));
+    setLoadingModels(true);
+    loadAllModels(settings.endpoints).then((res) => {
+      if (cancelled) return;
+      setLoads(res);
+      setLoadingModels(false);
+    });
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [endpoint, conversationId]);
+  }, [endpointsKey]);
 
-  // Autoscroll, but only when the user is already near the bottom. The moment
-  // they scroll up, we stop yanking them back down; when they return to the
-  // bottom, sticking resumes. `atBottom` drives the "jump to latest" button.
+  useEffect(() => {
+    if (models.length === 0) return;
+    const current = useMimir.getState().conversations[conversationId];
+    if (!current) return;
+    const stillValid =
+      current.model && models.some((m) => m.key === current.model);
+    if (!stillValid) {
+      const fallback =
+        settings.defaultConversationModel &&
+        models.some((m) => m.key === settings.defaultConversationModel)
+          ? settings.defaultConversationModel
+          : models[0].key;
+      setConversationModel(conversationId, fallback);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [models, conversationId]);
+
+  useEffect(() => {
+    const resolved = resolveModelKey(conversation?.model, settings);
+    if (!resolved) return;
+    let cancelled = false;
+    fetchContextSize(resolved.url).then((n) => !cancelled && setContextSize(n));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversation?.model, endpointsKey]);
+
   const [atBottom, setAtBottom] = useState(true);
   const atBottomRef = useRef(true);
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
-    // Within 80px of the bottom counts as "at bottom".
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
     atBottomRef.current = near;
     setAtBottom(near);
@@ -86,51 +120,35 @@ export default function ChatView({ conversationId }: { conversationId: string })
     }
   }, []);
 
-  // New tokens/messages: stick to bottom only if the user hasn't scrolled away.
   useEffect(() => {
     scrollToBottom();
   }, [conversation?.messages, scrollToBottom]);
 
-  if (!conversation) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-parchment-600">
-        This conversation no longer exists.
-      </div>
-    );
-  }
+  const runCompletion = useCallback(
+    async (history: Message[]) => {
+      const state = useMimir.getState();
+      const current = state.conversations[conversationId];
+      const resolved = resolveModelKey(current?.model, state.settings);
+      if (!resolved) {
+        setStreamError("Pick a model first — none is selected.");
+        return;
+      }
 
-  /** Streams a completion for the given history into a new assistant message. */
-  async function runCompletion(history: Message[]) {
-    const current = useMimir.getState().conversations[conversationId];
-    if (!current?.model) {
-      setStreamError("Pick a model first — none is selected.");
-      return;
-    }
+      setStreamError(null);
 
-    setStreamError(null);
+      const assistantMessage: Message = {
+        id: uid("msg_"),
+        role: "assistant",
+        content: "",
+        createdAt: Date.now(),
+        model: current?.model,
+      };
+      appendMessage(conversationId, assistantMessage);
 
-    const assistantMessage: Message = {
-      id: uid("msg_"),
-      role: "assistant",
-      content: "",
-      createdAt: Date.now(),
-    };
-    appendMessage(conversationId, assistantMessage);
+      setStreaming(true);
+      const controller = new AbortController();
+      abortRef.current = controller;
 
-    setStreaming(true);
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    try {
-      const memoryPrompt = buildMemoryPrompt(Object.values(memories));
-      const skillsPrompt = buildSkillsPrompt(Object.values(skills));
-      const system =
-        [memoryPrompt, skillsPrompt].filter(Boolean).join("\n\n") || undefined;
-
-      // Build the tool registry. The remember handler is wired to the store so
-      // Mimir owns the write; the model only expresses intent. load_skill
-      // returns a skill's full instructions on demand. New tools (web_search,
-      // file ops, …) register here and the loop handles them unchanged.
       const registry: ToolRegistry = {
         remember: rememberTool((content, category) => {
           addMemory(content, { category, source: "auto" });
@@ -143,177 +161,199 @@ export default function ChatView({ conversationId }: { conversationId: string })
         }),
       };
 
-      // Track time spent inside <think> blocks by watching the stream for the
-      // open/close transitions. Handles the common single-block case exactly.
+      const memoryPrompt = buildMemoryPrompt(
+        Object.values(useMimir.getState().memories)
+      );
+      const skillsPrompt = buildSkillsPrompt(
+        Object.values(useMimir.getState().skills)
+      );
+      const system =
+        [memoryPrompt, skillsPrompt].filter(Boolean).join("\n\n") || undefined;
+
       let thinkStartedAt: number | null = null;
       let thinkingMs = 0;
       let sawThinkOpen = false;
       let sawThinkClose = false;
+      let interrupted = false;
 
-      const result = await runToolLoop(
-        {
-          endpoint,
-          model: current.model,
-          messages: history.map((m) => ({ role: m.role, content: m.content })),
-          system,
-          registry,
-          signal: controller.signal,
-        },
-        // Streams the combined transcript (text + tool markers) into the bubble.
-        (accumulated) => {
-          if (!sawThinkOpen && accumulated.includes("<think>")) {
-            sawThinkOpen = true;
-            thinkStartedAt = performance.now();
-          }
-          if (
-            sawThinkOpen &&
-            !sawThinkClose &&
-            accumulated.includes("</think>")
-          ) {
-            sawThinkClose = true;
-            if (thinkStartedAt != null) {
-              thinkingMs = performance.now() - thinkStartedAt;
+      try {
+        const result = await runToolLoop(
+          {
+            endpoint: resolved.url,
+            model: resolved.modelId,
+            messages: history.map((m) => ({ role: m.role, content: m.content })),
+            system,
+            registry,
+            signal: controller.signal,
+          },
+          (accumulated) => {
+            if (!sawThinkOpen && accumulated.includes("<think>")) {
+              sawThinkOpen = true;
+              thinkStartedAt = performance.now();
             }
+            if (
+              sawThinkOpen &&
+              !sawThinkClose &&
+              accumulated.includes("</think>")
+            ) {
+              sawThinkClose = true;
+              if (thinkStartedAt != null) {
+                thinkingMs = performance.now() - thinkStartedAt;
+              }
+            }
+            patchMessage(conversationId, assistantMessage.id, {
+              content: accumulated,
+            });
+          },
+          (event: ToolEvent) => {
+            const existing =
+              useMimir.getState().conversations[conversationId]?.messages.find(
+                (m) => m.id === assistantMessage.id
+              )?.toolEvents ?? [];
+            patchMessage(conversationId, assistantMessage.id, {
+              toolEvents: [...existing, event],
+            });
           }
+        );
+
+        if (sawThinkOpen && !sawThinkClose && thinkStartedAt != null) {
+          thinkingMs = performance.now() - thinkStartedAt;
+        }
+
+        patchMessage(conversationId, assistantMessage.id, {
+          content: result.content,
+          meta: {
+            ...result.meta,
+            contextSize: contextSize ?? undefined,
+            thinkingMs: thinkingMs || undefined,
+          },
+        });
+      } catch (e) {
+        if ((e as Error).name === "AbortError") {
+          interrupted = true;
+        } else {
+          setStreamError((e as Error).message);
+        }
+      } finally {
+        if (interrupted) {
           patchMessage(conversationId, assistantMessage.id, {
-            content: accumulated,
-          });
-        },
-        // Persist each tool event as it completes so chips render inline and
-        // survive reload.
-        (event: ToolEvent) => {
-          const existing =
-            useMimir.getState().conversations[conversationId]?.messages.find(
-              (m) => m.id === assistantMessage.id
-            )?.toolEvents ?? [];
-          patchMessage(conversationId, assistantMessage.id, {
-            toolEvents: [...existing, event],
+            interrupted: true,
+            meta: {
+              contextSize: contextSize ?? undefined,
+              thinkingMs: thinkingMs || undefined,
+            },
           });
         }
-      );
+        setStreaming(false);
+        abortRef.current = null;
+      }
+    },
+    [conversationId, appendMessage, patchMessage, addMemory, contextSize]
+  );
 
-      // If thinking never closed (e.g. aborted mid-thought), still record what
-      // elapsed so the panel shows a duration.
-      if (sawThinkOpen && !sawThinkClose && thinkStartedAt != null) {
-        thinkingMs = performance.now() - thinkStartedAt;
+  const send = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed || streamingRef.current) return;
+
+      const userMessage: Message = {
+        id: uid("msg_"),
+        role: "user",
+        content: trimmed,
+        createdAt: Date.now(),
+      };
+
+      const before = useMimir.getState().conversations[conversationId];
+      appendMessage(conversationId, userMessage);
+
+      if (before && before.messages.length === 0) {
+        setConversationTitle(
+          conversationId,
+          trimmed.length > 42 ? trimmed.slice(0, 42) + "…" : trimmed
+        );
       }
 
-      // If the model ended without any closing prose but did run tools, the
-      // transcript already shows the chips — no placeholder needed.
-      patchMessage(conversationId, assistantMessage.id, {
-        content: result.content,
-        meta: {
-          ...result.meta,
-          contextSize: contextSize ?? undefined,
-          thinkingMs: thinkingMs || undefined,
-        },
-      });
-    } catch (e) {
-      if ((e as Error).name !== "AbortError") {
-        setStreamError((e as Error).message);
-      }
-    } finally {
-      setStreaming(false);
-      abortRef.current = null;
-    }
-  }
+      await runCompletion([...(before?.messages ?? []), userMessage]);
+    },
+    [conversationId, appendMessage, setConversationTitle, runCompletion]
+  );
 
-  async function send(text: string) {
-    const trimmed = text.trim();
-    if (!trimmed || streaming) return;
+  const resend = useCallback(
+    async (messageId: string) => {
+      if (streamingRef.current) return;
+      truncateAfterMessage(conversationId, messageId);
+      const current = useMimir.getState().conversations[conversationId];
+      if (!current) return;
+      await runCompletion(current.messages);
+    },
+    [conversationId, truncateAfterMessage, runCompletion]
+  );
 
-
-    const userMessage: Message = {
-      id: uid("msg_"),
-      role: "user",
-      content: trimmed,
-      createdAt: Date.now(),
-    };
-
-    const before = useMimir.getState().conversations[conversationId];
-    appendMessage(conversationId, userMessage);
-
-    // First user message names the conversation.
-    if (before && before.messages.length === 0) {
-      setConversationTitle(
-        conversationId,
-        trimmed.length > 42 ? trimmed.slice(0, 42) + "…" : trimmed
-      );
-    }
-
-    await runCompletion([...(before?.messages ?? []), userMessage]);
-  }
-
-  /** Drops everything after a user message and regenerates from it. */
-  async function resend(messageId: string) {
-    console.log("test");
-    if (streaming) return;
-    truncateAfterMessage(conversationId, messageId);
-    const current = useMimir.getState().conversations[conversationId];
-    if (!current) return;
-    await runCompletion(current.messages);
-  }
-
-  function stop() {
+  const stop = useCallback(() => {
     abortRef.current?.abort();
+  }, []);
+
+  const handleDeleteMessage = useCallback(
+    (id: string) => deleteMessage(conversationId, id),
+    [conversationId, deleteMessage]
+  );
+
+  if (!conversation) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-parchment-600">
+        This conversation no longer exists.
+      </div>
+    );
   }
+
+  const noEndpoints = settings.endpoints.length === 0;
+  const noModels = !loadingModels && models.length === 0;
 
   return (
     <div className="flex h-full flex-col">
-      {/* Conversation header */}
       <div className="flex items-center gap-3 border-b border-ink-700 px-5 py-2.5">
         <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-parchment-600">
           Model
         </span>
-        {models.length > 0 ? (
-          <select
-            value={conversation.model ?? ""}
-            onChange={(e) => setConversationModel(conversationId, e.target.value)}
-            className="rounded-md border border-ink-700 bg-ink-850 px-2 py-1 font-mono text-xs text-parchment-100"
-          >
-            {models.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.id}
-              </option>
-            ))}
-          </select>
+        {loadingModels ? (
+          <span className="font-mono text-xs text-parchment-600">loading…</span>
+        ) : models.length > 0 ? (
+          <ModelSelect
+            models={models}
+            value={conversation.model}
+            onChange={(key) => setConversationModel(conversationId, key)}
+          />
         ) : (
           <span className="font-mono text-xs text-parchment-600">
-            {modelsError ? "endpoint unreachable" : "loading…"}
+            {noEndpoints ? "no endpoints configured" : "no models available"}
           </span>
         )}
-        {modelsError && (
+        {(noModels || noEndpoints) && (
           <button
             onClick={() => openWindow("settings")}
             className="ml-auto text-xs text-bronze-300 hover:underline"
           >
-            Check endpoint in Settings →
+            Open Settings →
           </button>
         )}
       </div>
 
-      {/* Messages */}
       <div className="relative min-h-0 flex-1">
-        <div
-          ref={scrollRef}
-          onScroll={handleScroll}
-          className="h-full overflow-y-auto"
-        >
+        <div ref={scrollRef} onScroll={handleScroll} className="h-full overflow-y-auto">
           <div className="mx-auto flex max-w-4xl flex-col gap-6 px-5 py-6">
             {conversation.messages.length === 0 && (
               <p className="pt-16 text-center text-sm text-parchment-600">
-                Send a message to begin. No data will leave Mimir unless you use an externally hosted model, or web search.
+                Send a message to begin. No data will leave Mimir unless you use
+                an externally hosted model, or web search.
               </p>
             )}
             {conversation.messages.map((m, i) => (
               <MessageRow
                 key={m.id}
                 message={m}
-                isStreaming={
-                  streaming && i === conversation.messages.length - 1
-                }
-                onDelete={() => deleteMessage(conversationId, m.id)}
-                onResend={m.role === "user" ? () => resend(m.id) : undefined}
+                isStreaming={streaming && i === conversation.messages.length - 1}
+                onDelete={handleDeleteMessage}
+                onResend={m.role === "user" ? resend : undefined}
               />
             ))}
             {streamError && (
@@ -324,29 +364,81 @@ export default function ChatView({ conversationId }: { conversationId: string })
           </div>
         </div>
 
-        {/* Jump to latest — appears when scrolled up, more prominent while
-            a response is still streaming below the fold. */}
         {!atBottom && (
           <button
             onClick={() => scrollToBottom(true)}
             className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-ink-700 bg-ink-850 px-3 py-1.5 text-xs text-parchment-100 shadow-lg transition-colors hover:bg-ink-800"
           >
-            {streaming && (
-              <span className="h-1.5 w-1.5 rounded-full bg-bronze-400" />
-            )}
+            {streaming && <span className="h-1.5 w-1.5 rounded-full bg-bronze-400" />}
             {streaming ? "Generating — jump to latest" : "Jump to latest"}
             <IconChevron className="h-3.5 w-3.5" />
           </button>
         )}
       </div>
 
-      {/* Input */}
       <ChatInput
         streaming={streaming}
         onSend={send}
         onStop={stop}
         onResize={() => scrollToBottom()}
       />
+    </div>
+  );
+}
+
+function ModelSelect({
+  models,
+  value,
+  onChange,
+}: {
+  models: ResolvedModel[];
+  value?: string;
+  onChange: (key: string) => void;
+}) {
+  const groups = useMemo(() => {
+    const map = new Map<string, { name: string; items: ResolvedModel[] }>();
+    for (const m of models) {
+      if (!map.has(m.endpointId)) {
+        map.set(m.endpointId, { name: m.endpointName, items: [] });
+      }
+      map.get(m.endpointId)!.items.push(m);
+    }
+    return [...map.values()];
+  }, [models]);
+
+  const active = models.find((m) => m.key === value);
+
+  return (
+    <div className="flex items-center gap-2">
+      <select
+        value={value ?? ""}
+        onChange={(e) => onChange(e.target.value)}
+        className="max-w-[20rem] rounded-md border border-ink-700 bg-ink-850 px-2 py-1 font-mono text-xs text-parchment-100"
+      >
+        {groups.length === 1
+          ? groups[0].items.map((m) => (
+              <option key={m.key} value={m.key}>
+                {m.modelId}
+              </option>
+            ))
+          : groups.map((g) => (
+              <optgroup key={g.name} label={g.name}>
+                {g.items.map((m) => (
+                  <option key={m.key} value={m.key}>
+                    {m.modelId}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+      </select>
+      {active && (
+        <span className="hidden font-mono text-[10px] text-parchment-600 sm:inline">
+          {groups.length > 1 ? active.endpointName : ""}
+          {active.contextLength
+            ? `${groups.length > 1 ? " · " : ""}${formatTokens(active.contextLength)} ctx`
+            : ""}
+        </span>
+      )}
     </div>
   );
 }
@@ -360,8 +452,8 @@ const MessageRow = memo(
   }: {
     message: Message;
     isStreaming: boolean;
-    onDelete: () => void;
-    onResend?: () => void;
+    onDelete: (id: string) => void;
+    onResend?: (id: string) => void;
   }) {
     const isUser = message.role === "user";
     const [copied, setCopied] = useState(false);
@@ -373,97 +465,114 @@ const MessageRow = memo(
       });
     }
 
-  return (
-    <div
-      className={[
-        "group flex flex-col gap-1",
-        isUser ? "items-end" : "items-start",
-      ].join(" ")}
-    >
+    return (
       <div
         className={[
-          "max-w-[88%] min-w-0 rounded-lg px-4 py-2.5",
-          isUser
-            ? "whitespace-pre-wrap bg-bronze-600/20 text-sm leading-relaxed text-parchment-100"
-            : "w-full border border-ink-700 bg-ink-900 text-parchment-100",
+          "group flex flex-col gap-1",
+          isUser ? "items-end" : "items-start",
         ].join(" ")}
       >
-        {isUser ? (
-          message.content
-        ) : message.content ? (
-          <AssistantBody
-            content={message.content}
-            isStreaming={isStreaming}
-            toolEvents={message.toolEvents ?? []}
-            thinkingMs={message.meta?.thinkingMs}
-          />
-        ) : (
-          <span className="text-sm text-parchment-600">
-            {isStreaming ? "▍" : "(empty response)"}
-          </span>
-        )}
-      </div>
-
-      {/* Meta + actions row */}
-      <div
-        className={[
-          "flex items-center gap-1.5 px-1 font-mono text-[11px] text-parchment-600",
-          isUser ? "flex-row-reverse" : "",
-        ].join(" ")}
-      >
-        {!isUser && message.meta && <MetaLine meta={message.meta} />}
         <div
           className={[
-            "flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100",
+            "max-w-[88%] min-w-0 rounded-lg px-4 py-2.5",
+            isUser
+              ? "whitespace-pre-wrap bg-bronze-600/20 text-sm leading-relaxed text-parchment-100"
+              : "w-full border border-ink-700 bg-ink-900 text-parchment-100",
+          ].join(" ")}
+        >
+          {isUser ? (
+            message.content
+          ) : message.content ? (
+            <>
+              <AssistantBody
+                content={message.content}
+                isStreaming={isStreaming}
+                toolEvents={message.toolEvents ?? []}
+                thinkingMs={message.meta?.thinkingMs}
+              />
+              {message.interrupted && <InterruptedTag />}
+            </>
+          ) : message.interrupted ? (
+            <InterruptedTag standalone />
+          ) : (
+            <span className="text-sm text-parchment-600">
+              {isStreaming ? "▍" : "(empty response)"}
+            </span>
+          )}
+        </div>
+
+        <div
+          className={[
+            "flex items-center gap-1.5 px-1 font-mono text-[11px] text-parchment-600",
             isUser ? "flex-row-reverse" : "",
           ].join(" ")}
         >
-          <ActionButton
-            label={copied ? "Copied" : "Copy message"}
-            onClick={copy}
+          {!isUser && <MetaLine meta={message.meta} modelKey={message.model} />}
+          <div
+            className={[
+              "flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100",
+              isUser ? "flex-row-reverse" : "",
+            ].join(" ")}
           >
-            {copied ? (
-              <IconCheck className="h-3.5 w-3.5 text-signal-ok" />
-            ) : (
-              <IconCopy className="h-3.5 w-3.5" />
-            )}
-          </ActionButton>
-          {onResend && (
-            <ActionButton
-              label="Resend (regenerates everything after this message)"
-              onClick={onResend}
-              disabled={isStreaming}
-            >
-              <IconResend className="h-3.5 w-3.5" />
+            <ActionButton label={copied ? "Copied" : "Copy message"} onClick={copy}>
+              {copied ? (
+                <IconCheck className="h-3.5 w-3.5 text-signal-ok" />
+              ) : (
+                <IconCopy className="h-3.5 w-3.5" />
+              )}
             </ActionButton>
-          )}
-          <ActionButton label="Delete message" onClick={onDelete} danger>
-            <IconTrash className="h-3.5 w-3.5" />
-          </ActionButton>
+            {onResend && (
+              <ActionButton
+                label="Resend (regenerates everything after this message)"
+                onClick={() => onResend(message.id)}
+                disabled={isStreaming}
+              >
+                <IconResend className="h-3.5 w-3.5" />
+              </ActionButton>
+            )}
+            <ConfirmDelete
+              label="Delete message"
+              message="Delete?"
+              onConfirm={() => onDelete(message.id)}
+            />
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
   },
-  // Re-render only when the message content/meta, streaming state, or whether
-  // it can resend actually change — ignore the always-fresh callback props.
-  // This keeps unchanged messages from re-rendering (and re-parsing markdown)
-  // while another message streams.
   (prev, next) =>
     prev.message === next.message &&
     prev.isStreaming === next.isStreaming &&
-    !prev.onResend === !next.onResend
+    prev.onResend === next.onResend &&
+    prev.onDelete === next.onDelete
 );
 
-function MetaLine({ meta }: { meta: NonNullable<Message["meta"]> }) {
+function InterruptedTag({ standalone = false }: { standalone?: boolean }) {
+  return (
+    <div
+      className={[
+        "flex items-center gap-1.5 text-[11px] text-parchment-600",
+        standalone ? "" : "mt-2 border-t border-ink-700 pt-2",
+      ].join(" ")}
+    >
+      <IconStop className="h-3 w-3 text-signal-err" />
+      <span className="italic">Generation interrupted</span>
+    </div>
+  );
+}
+
+function MetaLine({
+  meta,
+  modelKey,
+}: {
+  meta?: NonNullable<Message["meta"]>;
+  modelKey?: string;
+}) {
+  const settings = useMimir((s) => s.settings);
   const parts: string[] = [];
-  if (meta.tokensPerSecond) {
-    parts.push(`${meta.tokensPerSecond.toFixed(1)} tok/s`);
-  }
-  if (meta.completionTokens) {
-    parts.push(`${formatTokens(meta.completionTokens)} out`);
-  }
-  if (meta.promptTokens != null && meta.completionTokens != null) {
+  if (meta?.tokensPerSecond) parts.push(`${meta.tokensPerSecond.toFixed(1)} tok/s`);
+  if (meta?.completionTokens) parts.push(`${formatTokens(meta.completionTokens)} out`);
+  if (meta?.promptTokens != null && meta?.completionTokens != null) {
     const used = meta.promptTokens + meta.completionTokens;
     parts.push(
       meta.contextSize
@@ -471,24 +580,29 @@ function MetaLine({ meta }: { meta: NonNullable<Message["meta"]> }) {
         : `${formatTokens(used)} ctx`
     );
   }
-  if (meta.durationMs) {
-    parts.push(`${(meta.durationMs / 1000).toFixed(1)}s`);
-  }
-  if (parts.length === 0) return null;
-  return <span>{parts.join(" · ")}</span>;
+  if (meta?.durationMs) parts.push(`${(meta.durationMs / 1000).toFixed(1)}s`);
+
+  const modelLabel = modelKey ? describeModelKey(modelKey, settings) : null;
+  if (!modelLabel && parts.length === 0) return null;
+
+  return (
+    <span className="flex items-center gap-1.5">
+      {modelLabel && <span className="text-parchment-400">{modelLabel}</span>}
+      {modelLabel && parts.length > 0 && <span className="text-ink-700">|</span>}
+      {parts.length > 0 && <span>{parts.join(" · ")}</span>}
+    </span>
+  );
 }
 
 function ActionButton({
   label,
   onClick,
   children,
-  danger,
   disabled,
 }: {
   label: string;
   onClick: () => void;
   children: React.ReactNode;
-  danger?: boolean;
   disabled?: boolean;
 }) {
   return (
@@ -497,12 +611,7 @@ function ActionButton({
       disabled={disabled}
       title={label}
       aria-label={label}
-      className={[
-        "rounded p-1 transition-colors disabled:opacity-30",
-        danger
-          ? "text-parchment-600 hover:bg-ink-800 hover:text-signal-err"
-          : "text-parchment-600 hover:bg-ink-800 hover:text-parchment-100",
-      ].join(" ")}
+      className="rounded p-1 text-parchment-600 transition-colors hover:bg-ink-800 hover:text-parchment-100 disabled:opacity-30"
     >
       {children}
     </button>
@@ -515,12 +624,6 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
-/**
- * Isolated input. Owns its own text state so keystrokes re-render only this
- * component, never the message list (which is expensive to re-parse). Auto-
- * grows to fit content and reports height changes via onResize so the parent
- * can keep the latest message visible as the box grows.
- */
 function ChatInput({
   streaming,
   onSend,
@@ -536,8 +639,6 @@ function ChatInput({
   const ref = useRef<HTMLTextAreaElement>(null);
   const lastHeight = useRef(0);
 
-  // Grow to fit content (capped by max-height in CSS). When the rendered
-  // height actually changes, nudge the parent to re-pin the scroll position.
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -599,10 +700,6 @@ function ChatInput({
   );
 }
 
-/**
- * Renders an assistant message as ordered segments: thinking panels, inline
- * tool chips, and markdown prose, exactly where they appear in the stream.
- */
 function AssistantBody({
   content,
   isStreaming,
@@ -615,7 +712,6 @@ function AssistantBody({
   thinkingMs?: number;
 }) {
   const segments = parseTranscript(content);
-
   return (
     <div className="flex flex-col gap-2">
       {segments.map((seg, i) => {
@@ -641,10 +737,6 @@ function AssistantBody({
   );
 }
 
-/**
- * Collapsible reasoning panel in the brand accent. Expanded and ticking while
- * the model thinks; collapses to a summary with the elapsed duration after.
- */
 function ThinkingPanel({
   text,
   live,
@@ -654,32 +746,26 @@ function ThinkingPanel({
   live: boolean;
   thinkingMs?: number;
 }) {
-  // Open while thinking; default collapsed once done.
   const [open, setOpen] = useState(live);
   const [elapsed, setElapsed] = useState(0);
   const startRef = useRef<number | null>(null);
 
-  // Tick the duration up while live.
   useEffect(() => {
     if (!live) return;
     setOpen(true);
     if (startRef.current == null) startRef.current = performance.now();
     const t = setInterval(() => {
-      if (startRef.current != null) {
-        setElapsed(performance.now() - startRef.current);
-      }
+      if (startRef.current != null) setElapsed(performance.now() - startRef.current);
     }, 100);
     return () => clearInterval(t);
   }, [live]);
 
-  // Collapse automatically when thinking finishes.
   useEffect(() => {
     if (!live) setOpen(false);
   }, [live]);
 
   const duration = live ? elapsed : thinkingMs;
-  const durationLabel =
-    duration != null ? `${(duration / 1000).toFixed(1)}s` : null;
+  const durationLabel = duration != null ? `${(duration / 1000).toFixed(1)}s` : null;
 
   return (
     <div className="overflow-hidden rounded-md border border-bronze-600/40 bg-bronze-600/10">
@@ -687,21 +773,14 @@ function ThinkingPanel({
         onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center gap-2 bg-bronze-600/15 px-3 py-1.5 text-left text-xs text-bronze-300 transition-colors hover:bg-bronze-600/25"
       >
-        {live ? (
-          <IconSpark className="h-3.5 w-3.5 mimir-spin text-bronze-400" />
-        ) : (
-          <IconSpark className="h-3.5 w-3.5 text-bronze-400" />
-        )}
+        <IconSpark className={["h-3.5 w-3.5 text-bronze-400", live ? "mimir-spin" : ""].join(" ")} />
         <span className="font-medium">
           {live ? "Thinking" : "Thought"}
           {durationLabel ? ` · ${durationLabel}` : ""}
         </span>
         <div className="flex-1" />
         <IconChevron
-          className={[
-            "h-3.5 w-3.5 transition-transform",
-            open ? "" : "-rotate-90",
-          ].join(" ")}
+          className={["h-3.5 w-3.5 transition-transform", open ? "" : "-rotate-90"].join(" ")}
         />
       </button>
       {open && (
@@ -715,11 +794,13 @@ function ThinkingPanel({
   );
 }
 
-/** Inline chip showing a tool call that ran, expandable for its result. */
 function ToolChip({ event }: { event?: ToolEventRecord }) {
   const [open, setOpen] = useState(false);
+  const memories = useMimir((s) => s.memories);
+  const deleteMemory = useMimir((s) => s.deleteMemory);
+  const [deleted, setDeleted] = useState(false);
+
   if (!event) {
-    // Marker present but event not yet persisted (mid-stream) — show pending.
     return (
       <div className="inline-flex items-center gap-2 self-start rounded-md border border-ink-700 bg-ink-850 px-2.5 py-1 text-xs text-parchment-400">
         <IconSpark className="h-3.5 w-3.5 mimir-spin text-bronze-400" />
@@ -729,6 +810,14 @@ function ToolChip({ event }: { event?: ToolEventRecord }) {
   }
 
   const label = describeTool(event);
+
+  const savedContent =
+    event.name === "remember" && typeof event.args.content === "string"
+      ? (event.args.content as string)
+      : null;
+  const matchingMemory = savedContent
+    ? Object.values(memories).find((m) => m.content === savedContent.trim())
+    : undefined;
 
   return (
     <div className="self-start overflow-hidden rounded-md border border-ink-700 bg-ink-850">
@@ -740,10 +829,7 @@ function ToolChip({ event }: { event?: ToolEventRecord }) {
         <span className="font-mono text-bronze-300">{event.name}</span>
         <span className="text-parchment-600">{label}</span>
         <IconChevron
-          className={[
-            "h-3 w-3 transition-transform",
-            open ? "" : "-rotate-90",
-          ].join(" ")}
+          className={["h-3 w-3 transition-transform", open ? "" : "-rotate-90"].join(" ")}
         />
       </button>
       {open && (
@@ -751,13 +837,72 @@ function ToolChip({ event }: { event?: ToolEventRecord }) {
           <div className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-parchment-400">
             {event.result}
           </div>
+          {savedContent && (
+            <div className="mt-2 flex items-center gap-2 border-t border-ink-700 pt-2">
+              {deleted ? (
+                <span className="text-[11px] italic text-parchment-600">
+                  Memory deleted.
+                </span>
+              ) : matchingMemory ? (
+                <ConfirmDeleteInline
+                  message="Delete this memory?"
+                  onConfirm={() => {
+                    deleteMemory(matchingMemory.id);
+                    setDeleted(true);
+                  }}
+                />
+              ) : (
+                <span className="text-[11px] italic text-parchment-600">
+                  Memory no longer stored.
+                </span>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-/** A short human label for a tool event, by tool name. */
+function ConfirmDeleteInline({
+  onConfirm,
+  message,
+}: {
+  onConfirm: () => void;
+  message: string;
+}) {
+  const [armed, setArmed] = useState(false);
+  if (armed) {
+    return (
+      <span className="flex items-center gap-1.5 text-[11px] text-signal-err">
+        {message}
+        <button
+          onClick={onConfirm}
+          className="rounded px-1 hover:bg-signal-err/20"
+          title="Confirm — can't be undone"
+        >
+          <IconCheck className="h-3.5 w-3.5" />
+        </button>
+        <button
+          onClick={() => setArmed(false)}
+          className="rounded px-1 text-parchment-400 hover:bg-ink-700 hover:text-parchment-100"
+        >
+          cancel
+        </button>
+      </span>
+    );
+  }
+  return (
+    <button
+      onClick={() => setArmed(true)}
+      className="flex items-center gap-1 rounded text-[11px] text-parchment-400 hover:text-signal-err"
+    >
+      <IconTrash className="h-3.5 w-3.5" />
+      Delete memory
+    </button>
+  );
+}
+
 function describeTool(event: ToolEventRecord): string {
   if (event.name === "remember") {
     const c = event.args.content;

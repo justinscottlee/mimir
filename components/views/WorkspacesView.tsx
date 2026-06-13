@@ -1,7 +1,7 @@
 "use client";
 
 import { useMimir } from "@/lib/store";
-import { IconTrash } from "../icons";
+import ConfirmDelete from "../ConfirmDelete";
 
 export default function WorkspacesView() {
   const workspaces = useMimir((s) => s.workspaces);
@@ -50,16 +50,13 @@ export default function WorkspacesView() {
                   created {new Date(w.createdAt).toLocaleString()}
                 </div>
               </div>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  deleteWorkspace(w.id);
-                }}
-                className="rounded p-1.5 text-parchment-600 opacity-0 transition-opacity hover:bg-ink-700 hover:text-signal-err focus-visible:opacity-100 group-hover:opacity-100"
-                aria-label={`Delete ${w.name}`}
-              >
-                <IconTrash />
-              </button>
+              <div className="opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                <ConfirmDelete
+                  label={`Delete ${w.name}`}
+                  message="Delete? Can't be undone."
+                  onConfirm={() => deleteWorkspace(w.id)}
+                />
+              </div>
             </li>
           ))}
         </ul>

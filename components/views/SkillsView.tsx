@@ -4,7 +4,8 @@ import { useState } from "react";
 import { useMimir } from "@/lib/store";
 import { Skill } from "@/lib/types";
 import { parseSkillMarkdown } from "@/lib/skills";
-import { IconCheck, IconPlus, IconTrash } from "../icons";
+import { IconCheck, IconPlus } from "../icons";
+import ConfirmDelete from "../ConfirmDelete";
 
 type Mode =
   | { kind: "list" }
@@ -129,13 +130,13 @@ function SkillRow({
           </p>
         </div>
 
-        <button
-          onClick={onDelete}
-          className="rounded p-1 text-parchment-600 opacity-0 transition-opacity hover:bg-ink-800 hover:text-signal-err focus-visible:opacity-100 group-hover:opacity-100"
-          aria-label={`Delete ${skill.name}`}
-        >
-          <IconTrash className="h-3.5 w-3.5" />
-        </button>
+        <div className="opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+          <ConfirmDelete
+            label={`Delete ${skill.name}`}
+            message="Delete? Can't be undone."
+            onConfirm={onDelete}
+          />
+        </div>
       </div>
     </li>
   );

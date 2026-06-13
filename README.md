@@ -11,9 +11,21 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000, hit the gear in the sidebar footer, and point the
-endpoint at your llama.cpp server (e.g. `http://192.168.1.50:8080`). Use
-"Test connection" to confirm Mimir can see your models.
+Open http://localhost:3000, hit the gear in the sidebar footer, and add a
+llama.cpp endpoint under **Settings → Models & Endpoints** (e.g.
+`http://192.168.1.50:8080`). Each endpoint card shows how many models it sees,
+so you get immediate confirmation Mimir can reach it.
+
+### Multiple endpoints and model visibility
+
+Settings is split into sections (Models & Endpoints, System, Account). Under
+Models & Endpoints you can:
+
+- Add any number of llama.cpp endpoints, each with a friendly name and URL.
+- Enable or disable individual models per endpoint — disabled ones disappear
+  from every picker but stay one toggle away.
+- Pick a default model for new conversations and a separate default for new
+  workspaces (or leave either on "first available").
 
 ### Running llama.cpp with multiple models
 
@@ -52,7 +64,12 @@ from `/v1/chat/completions`.
   the underlying conversation/workspace too).
 - Manager pages (Conversations, Workspaces, Memories, Skills, Tools,
   Settings) open as draggable floating windows: title top-left, close button
-  top-right, one window per kind. Positions persist across refreshes.
+  top-right, one window per kind. Positions persist across refreshes. Each
+  window is resizable from the bottom-right corner, with a per-kind default,
+  minimum, and maximum size; the chosen size persists too.
+- The Conversations window has a search bar (matching titles and message
+  content, same as the global ⌘K search) and a Select mode for multi-select —
+  tick several conversations and delete them all behind a single confirmation.
 
 ## Chat features
 
@@ -64,12 +81,20 @@ from `/v1/chat/completions`.
 - Long code blocks collapse (~320px) with a fade and an Expand button once
   generation finishes; while streaming they stay fully expanded so the
   control doesn't flicker as the code grows.
-- Generation stats under each assistant message: tok/s, output tokens,
+- Generation stats under each assistant message: which model produced it
+  (with its endpoint, when more than one is configured), tok/s, output tokens,
   context usage (vs. the server's n_ctx from `/props`), and wall time.
   Server-reported usage/timings are preferred; falls back to client-side
   estimates when the server doesn't report them.
+- The model picker groups models by endpoint (via labelled option groups when
+  you have more than one) and shows the active model's endpoint and context
+  length alongside the dropdown.
+- Stopping a generation mid-stream keeps whatever streamed so far and tags the
+  message with a clear "Generation interrupted" marker at the end.
 - Message actions on hover: copy and delete on every message; resend on user
-  messages (truncates everything after and regenerates).
+  messages (truncates everything after and regenerates). Delete actions ask
+  for confirmation inline — a "Delete? Can't be undone" prompt appears beside
+  the button rather than nuking on a single misclick.
 - **Thinking.** Reasoning renders in a collapsible accent panel showing how
   long the model thought. While generating it stays expanded with a spinner
   and a live-ticking timer, then auto-collapses to a "Thought · 4.2s" summary
@@ -80,7 +105,8 @@ from `/v1/chat/completions`.
 - **Inline tool events.** Tool calls (memory saves, skill loads) render as
   chips in the chat at the point they occurred — expandable for the tool's
   result — so the timeline reflects the real order of thinking, tools, and
-  prose.
+  prose. When a chip is a `remember` save, expanding it offers a Delete-memory
+  button so you can undo the save in place without opening the Memories window.
 
 ## Memories
 
@@ -149,5 +175,5 @@ parser, discovery prompt, and tool.
 1. System prompt per conversation
 2. SQLite persistence (Drizzle or better-sqlite3) once data outgrows localStorage
 3. Generation params (temperature, top_p, max_tokens) in a per-chat drawer
-4. Window resizing + minimize-to-sidebar
+4. Grouping/folders for conversations in the Conversations window
 5. The workspace agent loop

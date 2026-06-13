@@ -26,7 +26,17 @@ export async function listModels(endpoint: string): Promise<LlamaModel[]> {
     throw new Error(`Endpoint responded ${res.status}`);
   }
   const json = await res.json();
-  return (json.data ?? []).map((m: { id: string }) => ({ id: m.id }));
+  return (json.data ?? []).map(
+    (m: {
+      id: string;
+      meta?: { n_ctx_train?: number; n_ctx?: number };
+      owned_by?: string;
+    }) => ({
+      id: m.id,
+      contextLength: m.meta?.n_ctx_train ?? m.meta?.n_ctx,
+      ownedBy: m.owned_by,
+    })
+  );
 }
 
 /** Reads the server context size from llama.cpp's /props, if available. */

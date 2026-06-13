@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import {
   Conversation,
+  Endpoint,
   FloatingWindow,
   Memory,
   Message,
@@ -12,6 +13,7 @@ import {
   Tab,
   TabKind,
   WindowKind,
+  WindowSizeSpec,
   Workspace,
 } from "./types";
 
@@ -23,14 +25,14 @@ export function uid(prefix = ""): string {
   );
 }
 
-/** Default sizes for each window kind. */
-const WINDOW_SIZES: Record<WindowKind, { w: number; h: number }> = {
-  conversations: { w: 640, h: 500 },
-  workspaces: { w: 640, h: 500 },
-  memories: { w: 580, h: 540 },
-  skills: { w: 620, h: 580 },
-  tools: { w: 560, h: 460 },
-  settings: { w: 660, h: 560 },
+/** Default + min/max sizes for each window kind, used for resizing. */
+export const WINDOW_SPECS: Record<WindowKind, WindowSizeSpec> = {
+  conversations: { defaultW: 680, defaultH: 540, minW: 420, minH: 320, maxW: 1100, maxH: 900 },
+  workspaces: { defaultW: 640, defaultH: 500, minW: 420, minH: 320, maxW: 1000, maxH: 860 },
+  memories: { defaultW: 580, defaultH: 540, minW: 420, minH: 360, maxW: 900, maxH: 880 },
+  skills: { defaultW: 620, defaultH: 580, minW: 460, minH: 380, maxW: 1000, maxH: 900 },
+  tools: { defaultW: 560, defaultH: 460, minW: 420, minH: 320, maxW: 900, maxH: 820 },
+  settings: { defaultW: 760, defaultH: 600, minW: 560, minH: 420, maxW: 1100, maxH: 900 },
 };
 
 interface MimirState {
@@ -58,11 +60,13 @@ interface MimirState {
   closeWindowByKind: (kind: WindowKind) => void;
   focusWindow: (windowId: string) => void;
   moveWindow: (windowId: string, x: number, y: number) => void;
+  resizeWindow: (windowId: string, w: number, h: number) => void;
 
   // Conversations
   newConversation: () => void;
   openConversation: (id: string) => void;
   deleteConversation: (id: string) => void;
+  deleteConversations: (ids: string[]) => void;
   appendMessage: (conversationId: string, message: Message) => void;
   patchMessage: (
     conversationId: string,
@@ -103,6 +107,10 @@ interface MimirState {
 
   // Settings / UI
   setSettings: (patch: Partial<Settings>) => void;
+  addEndpoint: (name: string, url: string) => string;
+  updateEndpoint: (id: string, patch: Partial<Omit<Endpoint, "id">>) => void;
+  removeEndpoint: (id: string) => void;
+  setModelDisabled: (modelKey: string, disabled: boolean) => void;
   setSearchOpen: (open: boolean) => void;
 }
 
@@ -117,7 +125,13 @@ export const useMimir = create<MimirState>()(
       workspaces: {},
       memories: {},
       skills: {},
-      settings: { endpoint: "http://localhost:8080", username: "admin" },
+      settings: {
+        endpoints: [
+          { id: "ep_default", name: "Local", url: "http://localhost:8080" },
+        ],
+        disabledModels: [],
+        username: "admin",
+      },
       searchOpen: false,
 
       // ---------- Tabs ----------
@@ -181,19 +195,32 @@ export const useMimir = create<MimirState>()(
           get().focusWindow(existing.id);
           return;
         }
-        const size = WINDOW_SIZES[kind];
+        const spec = WINDOW_SPECS[kind];
         const n = windows.length % 7;
         const win: FloatingWindow = {
           id: uid("win_"),
           kind,
           x: 90 + n * 32,
           y: 64 + n * 28,
-          w: size.w,
-          h: size.h,
+          w: spec.defaultW,
+          h: spec.defaultH,
           z: zTop + 1,
         };
         set({ windows: [...windows, win], zTop: zTop + 1 });
       },
+
+      resizeWindow: (windowId, w, h) =>
+        set((s) => ({
+          windows: s.windows.map((win) => {
+            if (win.id !== windowId) return win;
+            const spec = WINDOW_SPECS[win.kind];
+            return {
+              ...win,
+              w: Math.min(spec.maxW, Math.max(spec.minW, w)),
+              h: Math.min(spec.maxH, Math.max(spec.minH, h)),
+            };
+          }),
+        })),
 
       closeWindow: (windowId) =>
         set((s) => ({ windows: s.windows.filter((w) => w.id !== windowId) })),
@@ -228,6 +255,7 @@ export const useMimir = create<MimirState>()(
         const conversation: Conversation = {
           id,
           title: "New conversation",
+          model: get().settings.defaultConversationModel,
           messages: [],
           createdAt: now,
           updatedAt: now,
@@ -250,6 +278,21 @@ export const useMimir = create<MimirState>()(
           delete conversations[id];
           const tabs = s.tabs.filter(
             (t) => !(t.kind === "chat" && t.refId === id)
+          );
+          const activeTabId = tabs.some((t) => t.id === s.activeTabId)
+            ? s.activeTabId
+            : tabs[tabs.length - 1]?.id ?? null;
+          return { conversations, tabs, activeTabId };
+        });
+      },
+
+      deleteConversations: (ids) => {
+        const idSet = new Set(ids);
+        set((s) => {
+          const conversations = { ...s.conversations };
+          for (const id of ids) delete conversations[id];
+          const tabs = s.tabs.filter(
+            (t) => !(t.kind === "chat" && idSet.has(t.refId))
           );
           const activeTabId = tabs.some((t) => t.id === s.activeTabId)
             ? s.activeTabId
@@ -362,6 +405,7 @@ export const useMimir = create<MimirState>()(
         const workspace: Workspace = {
           id,
           name: "New workspace",
+          model: get().settings.defaultWorkspaceModel,
           createdAt: Date.now(),
         };
         set((s) => ({ workspaces: { ...s.workspaces, [id]: workspace } }));
@@ -504,11 +548,66 @@ export const useMimir = create<MimirState>()(
       setSettings: (patch) =>
         set((s) => ({ settings: { ...s.settings, ...patch } })),
 
+      addEndpoint: (name, url) => {
+        const id = uid("ep_");
+        set((s) => ({
+          settings: {
+            ...s.settings,
+            endpoints: [
+              ...s.settings.endpoints,
+              { id, name: name.trim() || "Endpoint", url: url.trim() },
+            ],
+          },
+        }));
+        return id;
+      },
+
+      updateEndpoint: (id, patch) =>
+        set((s) => ({
+          settings: {
+            ...s.settings,
+            endpoints: s.settings.endpoints.map((e) =>
+              e.id === id ? { ...e, ...patch } : e
+            ),
+          },
+        })),
+
+      removeEndpoint: (id) =>
+        set((s) => ({
+          settings: {
+            ...s.settings,
+            endpoints: s.settings.endpoints.filter((e) => e.id !== id),
+            // Drop disabled entries and default selections that referenced it.
+            disabledModels: s.settings.disabledModels.filter(
+              (k) => !k.startsWith(`${id}::`)
+            ),
+            defaultConversationModel:
+              s.settings.defaultConversationModel?.startsWith(`${id}::`)
+                ? undefined
+                : s.settings.defaultConversationModel,
+            defaultWorkspaceModel: s.settings.defaultWorkspaceModel?.startsWith(
+              `${id}::`
+            )
+              ? undefined
+              : s.settings.defaultWorkspaceModel,
+          },
+        })),
+
+      setModelDisabled: (modelKey, disabled) =>
+        set((s) => {
+          const cur = new Set(s.settings.disabledModels);
+          if (disabled) cur.add(modelKey);
+          else cur.delete(modelKey);
+          return {
+            settings: { ...s.settings, disabledModels: [...cur] },
+          };
+        }),
+
       setSearchOpen: (open) => set({ searchOpen: open }),
     }),
     {
       name: "mimir-store",
-      version: 2,
+      version: 3,
       migrate: (persisted: unknown, version) => {
         const state = persisted as Partial<MimirState> & {
           tabs?: { kind: string; refId?: string }[];
@@ -528,6 +627,23 @@ export const useMimir = create<MimirState>()(
             state.activeTabId =
               (state.tabs[state.tabs.length - 1] as Tab | undefined)?.id ?? null;
           }
+        }
+        if (version < 3) {
+          // v2 had a single `endpoint` string; promote to an endpoints array.
+          const old = (state.settings ?? {}) as {
+            endpoint?: string;
+            endpoints?: Endpoint[];
+            disabledModels?: string[];
+            username?: string;
+          };
+          const url = old.endpoint ?? "http://localhost:8080";
+          state.settings = {
+            endpoints: old.endpoints ?? [
+              { id: "ep_default", name: "Local", url },
+            ],
+            disabledModels: old.disabledModels ?? [],
+            username: old.username ?? "admin",
+          } as Settings;
         }
         return state as MimirState;
       },
