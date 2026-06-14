@@ -6,15 +6,54 @@ that ran on its own.
 
 ## Quick start
 
+Mimir now persists everything to **PostgreSQL** (with **Valkey** caching) and
+puts the workbench behind **user accounts** (Better Auth). The bundled compose
+file brings up both data stores:
+
 ```bash
+# 1. Install dependencies
 npm install
+
+# 2. Configure environment
+cp .env.example .env.local
+#   then set BETTER_AUTH_SECRET to a long random string, e.g.:
+#   openssl rand -base64 32
+
+# 3. Start Postgres + Valkey (and SearXNG if you want web search)
+docker compose up -d postgres valkey
+
+# 4. Create the database schema
+npm run db:migrate
+
+# 5. Run the app
 npm run dev
 ```
 
-Open http://localhost:3000, hit the gear in the sidebar footer, and add a
-llama.cpp endpoint under **Settings → Models & Endpoints** (e.g.
-`http://192.168.1.50:8080`). Each endpoint card shows how many models it sees,
-so you get immediate confirmation Mimir can reach it.
+Open http://localhost:3000. The first thing you'll see is the sign-in screen —
+create an account (registration is open by default; see `ALLOW_SIGNUP` below to
+lock it down), then add a llama.cpp endpoint under **Settings → Models &
+Endpoints** (e.g. `http://192.168.1.50:8080`). Each endpoint card shows how many
+models it sees, so you get immediate confirmation Mimir can reach it.
+
+### Environment variables
+
+| Variable             | Purpose                                                        | Default (dev)                              |
+| -------------------- | ------------------------------------------------------------- | ------------------------------------------ |
+| `DATABASE_URL`       | PostgreSQL connection string                                  | `postgres://mimir:mimir@localhost:5432/mimir` |
+| `VALKEY_URL`         | Valkey (Redis-protocol) connection string                     | `redis://localhost:6379`                   |
+| `BETTER_AUTH_SECRET` | Signing secret for sessions — **set this**                    | _none_                                     |
+| `BETTER_AUTH_URL`    | Public base URL of the app                                    | `http://localhost:3000`                    |
+| `ALLOW_SIGNUP`       | Set to `false` to disable new registrations (existing accounts can still sign in) | `true`              |
+
+### Database commands
+
+```bash
+npm run db:generate   # regenerate SQL migrations after editing lib/db/schema.ts
+npm run db:migrate    # apply pending migrations
+npm run db:push       # push schema directly (dev shortcut, skips migration files)
+npm run db:studio     # browse data in Drizzle Studio
+```
+
 
 ### Multiple endpoints and model visibility
 
@@ -26,8 +65,8 @@ Models & Endpoints you can:
   OpenRouter, Together, …). One-tap presets prefill the name and URL.
 - Give hosted endpoints an API key — sent as a bearer token, forwarded
   server-side through Mimir's proxy so it never sits in a URL or the browser
-  console. Local llama.cpp servers need no key. Keys persist in localStorage
-  with the rest of settings.
+  console. Local llama.cpp servers need no key. Keys are saved with the rest of
+  your settings in Postgres, scoped to your account.
 - Enable or disable individual models per endpoint — disabled ones disappear
   from every picker but stay one toggle away.
 - Pick a default model for new conversations and a separate default for new
@@ -56,10 +95,24 @@ from `/v1/chat/completions`.
 
 - **Next.js App Router + TypeScript + Tailwind.** One page, client-rendered
   shell (`components/AppShell.tsx`).
-- **State** lives in a Zustand store (`lib/store.ts`) persisted to
-  localStorage — conversations, workspaces, open tabs, and settings all
-  survive a refresh without a database. Swap the persistence layer for SQLite
-  later without touching components.
+- **State** lives in a Zustand store (`lib/store.ts`) that acts as an in-memory
+  optimistic cache. On sign-in the store hydrates from the server
+  (`GET /api/state`); every mutation updates local state immediately and is then
+  debounced and pushed to **PostgreSQL** through **Drizzle** in the background
+  (`lib/sync.ts` → `/api/*` route handlers → `lib/server/state.ts`). **Valkey**
+  caches each user's full snapshot so repeat loads skip the database. Because the
+  store keeps the same action names and shape it had under the old localStorage
+  setup, none of the 15 view components needed to change — the persistence layer
+  was swapped underneath them.
+- **Accounts & auth** use **Better Auth** (`lib/auth.ts`) with email + password,
+  Drizzle's Postgres adapter for the user/session/account tables, and Valkey as
+  session secondary storage. The whole workbench sits behind `AuthGate`
+  (`components/AuthGate.tsx`); all app data is scoped to the signed-in user via
+  a `user_id` foreign key. Set `ALLOW_SIGNUP=false` to run a closed instance.
+- **Schema** is defined once in `lib/db/schema.ts` (auth tables + conversations,
+  messages, workspaces, memories, skills, system prompts, settings, UI state).
+  Messages are stored relationally with an ordering `seq`; everything else hangs
+  off the user. Migrations live in `drizzle/` and are managed with Drizzle Kit.
 - **llama.cpp access** goes through a catch-all proxy route
   (`app/api/llama/[...path]/route.ts`). The browser only ever talks to Mimir;
   the Next server forwards to whatever endpoint you set, so CORS never comes
@@ -261,7 +314,7 @@ share one source of truth — what you preview is exactly what's sent.
   — plus the list of tools advertised as function schemas, with a copy button.
   Full transparency about what reaches the model.
 
-Presets are seeded into the store and reconciled on migration, so a user's
+Presets are seeded server-side per account and reconciled on load, so a user's
 enable/disable choices and custom prompts survive upgrades.
 
 ## Stubs (intentionally unbuilt)
@@ -272,7 +325,7 @@ enable/disable choices and custom prompts survive upgrades.
 ## Ideas for next steps
 
 1. System prompt per conversation
-2. SQLite persistence (Drizzle or better-sqlite3) once data outgrows localStorage
+2. OAuth / social sign-in providers (Better Auth makes these a small addition)
 3. Generation params (temperature, top_p, max_tokens) in a per-chat drawer
 4. Grouping/folders for conversations in the Conversations window
 5. The workspace agent loop

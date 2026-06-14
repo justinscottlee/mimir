@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMimir } from "@/lib/store";
+import { useSession, signOut } from "@/lib/auth-client";
 import {
   EndpointLoad,
   loadAllModels,
@@ -562,30 +563,73 @@ function SystemSection() {
 function AccountSection() {
   const settings = useMimir((s) => s.settings);
   const setSettings = useMimir((s) => s.setSettings);
+  const reset = useMimir((s) => s.reset);
+  const { data: session } = useSession();
   const [username, setUsername] = useState(settings.username);
+  const [signingOut, setSigningOut] = useState(false);
 
   const dirty = username.trim() !== settings.username;
+
+  async function handleSignOut() {
+    setSigningOut(true);
+    try {
+      // Push any pending writes before tearing the session down so nothing is
+      // lost between the last debounced save and sign-out.
+      const { flushAll } = await import("@/lib/sync");
+      await flushAll();
+      await signOut();
+    } catch {
+      // Ignore — we clear local state and reload regardless.
+    } finally {
+      reset();
+      window.location.reload();
+    }
+  }
 
   return (
     <div className="p-4 md:p-5">
       <SectionHeading
-        title="Profile"
-        subtitle="Shown in the sidebar. Local only — there are no accounts."
+        title="Account"
+        subtitle="Your sign-in identity and the display name shown in the sidebar."
       />
-      <input
-        value={username}
-        onChange={(e) => setUsername(e.target.value)}
-        placeholder="admin"
-        className="mt-4 w-64 rounded-md border border-ink-700 bg-ink-850 px-3 py-2 text-sm text-parchment-100 placeholder:text-parchment-600 focus:border-bronze-600 focus:outline-none"
-      />
-      <div className="mt-4">
-        <button
-          onClick={() => setSettings({ username: username.trim() || "admin" })}
-          disabled={!dirty}
-          className="rounded-md bg-bronze-500 px-4 py-2 text-sm font-medium text-ink-950 transition-colors hover:bg-bronze-400 disabled:opacity-30"
-        >
-          Save
-        </button>
+
+      {session?.user?.email && (
+        <div className="mt-4 flex items-center justify-between gap-4 rounded-md border border-ink-700 bg-ink-850 px-3 py-2.5">
+          <div className="min-w-0">
+            <div className="truncate text-sm text-parchment-100">
+              {session.user.email}
+            </div>
+            <div className="text-xs text-parchment-600">Signed in</div>
+          </div>
+          <button
+            onClick={handleSignOut}
+            disabled={signingOut}
+            className="shrink-0 rounded-md border border-ink-700 px-3 py-1.5 text-sm text-parchment-400 transition-colors hover:bg-ink-800 hover:text-parchment-100 disabled:opacity-50"
+          >
+            {signingOut ? "Signing out…" : "Sign out"}
+          </button>
+        </div>
+      )}
+
+      <div className="mt-6">
+        <label className="text-xs font-medium uppercase tracking-wide text-parchment-600">
+          Display name
+        </label>
+        <input
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder="admin"
+          className="mt-2 block w-64 rounded-md border border-ink-700 bg-ink-850 px-3 py-2 text-sm text-parchment-100 placeholder:text-parchment-600 focus:border-bronze-600 focus:outline-none"
+        />
+        <div className="mt-4">
+          <button
+            onClick={() => setSettings({ username: username.trim() || "admin" })}
+            disabled={!dirty}
+            className="rounded-md bg-bronze-500 px-4 py-2 text-sm font-medium text-ink-950 transition-colors hover:bg-bronze-400 disabled:opacity-30"
+          >
+            Save
+          </button>
+        </div>
       </div>
     </div>
   );

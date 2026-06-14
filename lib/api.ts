@@ -1,0 +1,80 @@
+"use client";
+
+import {
+  Conversation,
+  Memory,
+  Settings,
+  Skill,
+  SystemPrompt,
+  UserStateSnapshot,
+  UserUiState,
+  Workspace,
+} from "./types";
+
+/**
+ * Thin typed wrappers over the /api/* state routes. Every call is same-origin
+ * so the Better Auth session cookie rides along automatically. Mutations are
+ * fire-and-forget from the store's perspective (optimistic UI); these reject on
+ * non-2xx so the sync layer can log/retry.
+ */
+
+async function req(
+  method: string,
+  url: string,
+  body?: unknown
+): Promise<unknown> {
+  const res = await fetch(url, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    let detail = "";
+    try {
+      detail = (await res.json())?.error ?? "";
+    } catch {
+      /* ignore */
+    }
+    throw new Error(`${method} ${url} -> ${res.status}${detail ? `: ${detail}` : ""}`);
+  }
+  return res.status === 204 ? null : res.json().catch(() => null);
+}
+
+/** Fetch the full snapshot. Returns null on 401 (not signed in). */
+export async function fetchState(): Promise<UserStateSnapshot | null> {
+  const res = await fetch("/api/state");
+  if (res.status === 401) return null;
+  if (!res.ok) throw new Error(`GET /api/state -> ${res.status}`);
+  return (await res.json()) as UserStateSnapshot;
+}
+
+export const api = {
+  putConversation: (c: Conversation) =>
+    req("PUT", `/api/conversations/${encodeURIComponent(c.id)}`, c),
+  deleteConversation: (id: string) =>
+    req("DELETE", `/api/conversations/${encodeURIComponent(id)}`),
+  deleteConversationsBatch: (ids: string[]) =>
+    req("POST", `/api/conversations/delete-batch`, { ids }),
+
+  putWorkspace: (w: Workspace) =>
+    req("PUT", `/api/workspaces/${encodeURIComponent(w.id)}`, w),
+  deleteWorkspace: (id: string) =>
+    req("DELETE", `/api/workspaces/${encodeURIComponent(id)}`),
+
+  putMemory: (m: Memory) =>
+    req("PUT", `/api/memories/${encodeURIComponent(m.id)}`, m),
+  deleteMemory: (id: string) =>
+    req("DELETE", `/api/memories/${encodeURIComponent(id)}`),
+
+  putSkill: (s: Skill) => req("PUT", `/api/skills/${encodeURIComponent(s.id)}`, s),
+  deleteSkill: (id: string) =>
+    req("DELETE", `/api/skills/${encodeURIComponent(id)}`),
+
+  putSystemPrompt: (p: SystemPrompt) =>
+    req("PUT", `/api/system-prompts/${encodeURIComponent(p.id)}`, p),
+  deleteSystemPrompt: (id: string) =>
+    req("DELETE", `/api/system-prompts/${encodeURIComponent(id)}`),
+
+  putSettings: (s: Settings) => req("PUT", `/api/settings`, s),
+  putUiState: (ui: UserUiState) => req("PUT", `/api/ui-state`, ui),
+};

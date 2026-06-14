@@ -1,17 +1,26 @@
 {
   "name": "mimir",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Self-hosted AI workbench for local llama.cpp endpoints",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio",
+    "auth:generate": "better-auth generate --config lib/auth.ts"
   },
   "dependencies": {
     "@types/react-syntax-highlighter": "^15.5.13",
+    "better-auth": "^1.6.18",
+    "drizzle-orm": "^0.45.2",
+    "iovalkey": "^0.3.3",
     "next": "^14.2.15",
+    "pg": "^8.21.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
@@ -21,11 +30,18 @@
   },
   "devDependencies": {
     "@types/node": "^20.16.11",
+    "@types/pg": "^8.11.10",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.1",
     "autoprefixer": "^10.4.20",
+    "drizzle-kit": "^0.31.10",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.13",
     "typescript": "^5.6.3"
+  },
+  "allowScripts": {
+    "esbuild@0.18.20": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.1": true
   }
 }

@@ -291,3 +291,25 @@ export interface ResolvedModel {
   contextLength?: number;
   ownedBy?: string;
 }
+
+/**
+ * The full per-user snapshot the client store hydrates from and the server
+ * assembles from Postgres (cached in Valkey). Mirrors the persisted slice of
+ * the old localStorage store, minus the code-defined preset generators.
+ */
+export interface UserUiState {
+  tabs: Tab[];
+  activeTabId: string | null;
+  windows: FloatingWindow[];
+  zTop: number;
+}
+
+export interface UserStateSnapshot {
+  conversations: Record<string, Conversation>;
+  workspaces: Record<string, Workspace>;
+  memories: Record<string, Memory>;
+  skills: Record<string, Skill>;
+  systemPrompts: Record<string, SystemPrompt>;
+  settings: Settings;
+  ui: UserUiState;
+}
