@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMimir, WINDOW_SPECS } from "@/lib/store";
 import { FloatingWindow as Win, WindowKind } from "@/lib/types";
+import { useIsMobile } from "@/lib/useMediaQuery";
 import { IconClose } from "./icons";
 import ConversationsView from "./views/ConversationsView";
 import WorkspacesView from "./views/WorkspacesView";
@@ -22,16 +23,26 @@ const WINDOW_TITLES: Record<WindowKind, string> = {
 
 export function WindowLayer() {
   const windows = useMimir((s) => s.windows);
+  const isMobile = useIsMobile();
+
+  // On mobile, stacked floating windows don't make sense — show only the
+  // top-most (highest z) window as a full-screen sheet.
+  const visible = isMobile
+    ? windows.length
+      ? [windows.reduce((a, b) => (b.z > a.z ? b : a))]
+      : []
+    : windows;
+
   return (
     <div className="pointer-events-none absolute inset-0 z-30">
-      {windows.map((w) => (
-        <FloatingWindow key={w.id} win={w} />
+      {visible.map((w) => (
+        <FloatingWindow key={w.id} win={w} isMobile={isMobile} />
       ))}
     </div>
   );
 }
 
-function FloatingWindow({ win }: { win: Win }) {
+function FloatingWindow({ win, isMobile }: { win: Win; isMobile: boolean }) {
   const closeWindow = useMimir((s) => s.closeWindow);
   const focusWindow = useMimir((s) => s.focusWindow);
   const moveWindow = useMimir((s) => s.moveWindow);
@@ -132,19 +143,31 @@ function FloatingWindow({ win }: { win: Win }) {
     <section
       role="dialog"
       aria-label={WINDOW_TITLES[win.kind]}
-      style={{
-        left: pos.x,
-        top: pos.y,
-        width: size.w,
-        height: size.h,
-        zIndex: win.z,
-      }}
-      className="pointer-events-auto absolute flex flex-col overflow-hidden rounded-lg border border-ink-700 bg-ink-900 shadow-[0_16px_48px_rgba(0,0,0,0.5)]"
+      style={
+        isMobile
+          ? { zIndex: win.z }
+          : {
+              left: pos.x,
+              top: pos.y,
+              width: size.w,
+              height: size.h,
+              zIndex: win.z,
+            }
+      }
+      className={[
+        "pointer-events-auto flex flex-col overflow-hidden border-ink-700 bg-ink-900",
+        isMobile
+          ? "fixed inset-0 h-app w-full rounded-none border-0"
+          : "absolute rounded-lg border shadow-[0_16px_48px_rgba(0,0,0,0.5)]",
+      ].join(" ")}
       onPointerDown={() => focusWindow(win.id)}
     >
       <header
-        onPointerDown={startDrag}
-        className="flex shrink-0 cursor-grab select-none items-center gap-2 border-b border-ink-700 bg-ink-850 px-3.5 py-2 active:cursor-grabbing"
+        onPointerDown={isMobile ? undefined : startDrag}
+        className={[
+          "flex shrink-0 select-none items-center gap-2 border-b border-ink-700 bg-ink-850 px-3.5 py-2.5 md:py-2",
+          isMobile ? "" : "cursor-grab active:cursor-grabbing",
+        ].join(" ")}
       >
         <span className="h-1.5 w-1.5 rounded-full bg-bronze-500" />
         <span className="flex-1 truncate text-sm font-medium text-parchment-100">
@@ -152,34 +175,36 @@ function FloatingWindow({ win }: { win: Win }) {
         </span>
         <button
           onClick={() => closeWindow(win.id)}
-          className="rounded-md p-1 text-parchment-600 transition-colors hover:bg-ink-700 hover:text-parchment-100"
+          className="rounded-md p-1.5 text-parchment-600 transition-colors hover:bg-ink-700 hover:text-parchment-100 md:p-1"
           aria-label={`Close ${WINDOW_TITLES[win.kind]}`}
           title="Close"
         >
-          <IconClose className="h-4 w-4" />
+          <IconClose className="h-5 w-5 md:h-4 md:w-4" />
         </button>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <WindowContent kind={win.kind} />
       </div>
 
-      {/* Resize handle (bottom-right) */}
-      <div
-        onPointerDown={startResize}
-        className="absolute bottom-0 right-0 z-10 h-4 w-4 cursor-se-resize"
-        title="Drag to resize"
-      >
-        <svg
-          viewBox="0 0 16 16"
-          className="absolute bottom-0.5 right-0.5 h-4 w-4 text-parchment-600"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.2"
-          strokeLinecap="round"
+      {/* Resize handle (bottom-right) — desktop only */}
+      {!isMobile && (
+        <div
+          onPointerDown={startResize}
+          className="absolute bottom-0 right-0 z-10 h-4 w-4 cursor-se-resize"
+          title="Drag to resize"
         >
-          <path d="M11 5 5 11M11 9l-2 2M11 13" />
-        </svg>
-      </div>
+          <svg
+            viewBox="0 0 16 16"
+            className="absolute bottom-0.5 right-0.5 h-4 w-4 text-parchment-600"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.2"
+            strokeLinecap="round"
+          >
+            <path d="M11 5 5 11M11 9l-2 2M11 13" />
+          </svg>
+        </div>
+      )}
     </section>
   );
 }

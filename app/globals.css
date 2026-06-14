@@ -15,6 +15,23 @@ body {
   height: 100%;
 }
 
+/* Full app height that respects the *dynamic* mobile viewport (so the chat
+   input isn't hidden behind the browser's collapsing address bar). Falls back
+   to vh on browsers without dvh. */
+.h-app {
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* Safe-area padding helpers for notched devices (used at the bottom of the
+   chat input and the mobile nav). */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.inset-safe-bottom {
+  bottom: env(safe-area-inset-bottom);
+}
+
 body {
   @apply bg-ink-950 text-parchment-100 antialiased;
 }

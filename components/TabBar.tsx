@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMimir } from "@/lib/store";
-import { IconBox, IconChat, IconClose, IconPlus } from "./icons";
+import { IconBox, IconChat, IconClose, IconMenu, IconPlus } from "./icons";
 
-export default function TabBar() {
+export default function TabBar({ onOpenNav }: { onOpenNav?: () => void }) {
   const tabs = useMimir((s) => s.tabs);
   const activeTabId = useMimir((s) => s.activeTabId);
   const setActiveTab = useMimir((s) => s.setActiveTab);
@@ -23,7 +23,15 @@ export default function TabBar() {
   }
 
   return (
-    <div className="flex h-10 items-end gap-1 overflow-x-auto border-b border-ink-700 bg-ink-900 px-2">
+    <div className="flex h-11 items-end gap-1 overflow-x-auto border-b border-ink-700 bg-ink-900 px-2 md:h-10">
+      {/* Hamburger — mobile only, opens the nav drawer */}
+      <button
+        onClick={onOpenNav}
+        aria-label="Open menu"
+        className="mb-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-parchment-400 hover:bg-ink-850 hover:text-parchment-100 md:hidden"
+      >
+        <IconMenu className="h-5 w-5" />
+      </button>
       {tabs.map((tab) => {
         const active = tab.id === activeTabId;
         const editing = tab.id === editingId;
@@ -93,7 +101,7 @@ export default function TabBar() {
                 e.stopPropagation();
                 closeTab(tab.id);
               }}
-              className="rounded p-0.5 text-parchment-600 opacity-0 transition-opacity hover:bg-ink-700 hover:text-parchment-100 focus-visible:opacity-100 group-hover:opacity-100"
+              className="rounded p-0.5 text-parchment-600 transition-opacity hover:bg-ink-700 hover:text-parchment-100 focus-visible:opacity-100 max-md:opacity-100 md:opacity-0 md:group-hover:opacity-100"
               aria-label={`Close ${tab.title}`}
             >
               <IconClose className="h-4 w-4" />
@@ -120,11 +128,15 @@ function NewTabButton() {
   // Position the menu just below the button, in viewport coordinates. The menu
   // is rendered in a portal (below) so it isn't clipped by the tab strip's
   // horizontal overflow or trapped behind other stacking contexts.
-  useLayoutEffect(() => {
-    if (!open || !btnRef.current) return;
+  const reposition = useCallback(() => {
+    if (!btnRef.current) return;
     const r = btnRef.current.getBoundingClientRect();
     setCoords({ left: r.left, top: r.bottom + 4 });
-  }, [open]);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (open) reposition();
+  }, [open, reposition]);
 
   useEffect(() => {
     if (!open) return;
@@ -141,20 +153,20 @@ function NewTabButton() {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") setOpen(false);
     }
-    function onScrollOrResize() {
-      setOpen(false);
-    }
+    // Keep the menu anchored to the button on scroll/resize rather than
+    // closing it — the button lives in the fixed top bar, so chat content
+    // autoscrolling during generation must not dismiss the menu.
     document.addEventListener("mousedown", onDocClick);
     document.addEventListener("keydown", onKey);
-    window.addEventListener("resize", onScrollOrResize);
-    window.addEventListener("scroll", onScrollOrResize, true);
+    window.addEventListener("resize", reposition);
+    window.addEventListener("scroll", reposition, true);
     return () => {
       document.removeEventListener("mousedown", onDocClick);
       document.removeEventListener("keydown", onKey);
-      window.removeEventListener("resize", onScrollOrResize);
-      window.removeEventListener("scroll", onScrollOrResize, true);
+      window.removeEventListener("resize", reposition);
+      window.removeEventListener("scroll", reposition, true);
     };
-  }, [open]);
+  }, [open, reposition]);
 
   return (
     <div className="relative mb-1 ml-0.5 shrink-0">

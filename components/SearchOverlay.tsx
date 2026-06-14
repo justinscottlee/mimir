@@ -78,7 +78,7 @@ export default function SearchOverlay() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 pt-[15vh]"
+      className="fixed inset-0 z-[60] flex items-start justify-center bg-black/60 px-3 pt-[12vh] md:pt-[15vh]"
       onClick={() => setOpen(false)}
     >
       <div
@@ -111,7 +111,7 @@ export default function SearchOverlay() {
               }
             }}
             placeholder="Search conversations and workspaces…"
-            className="flex-1 bg-transparent text-sm text-parchment-100 placeholder:text-parchment-600 focus:outline-none"
+            className="flex-1 bg-transparent text-base md:text-sm text-parchment-100 placeholder:text-parchment-600 focus:outline-none"
           />
           <kbd className="font-mono text-[10px] text-parchment-600">esc</kbd>
         </div>

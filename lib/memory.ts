@@ -27,22 +27,53 @@ export const MEMORY_TOOLS = [
     function: {
       name: "remember",
       description:
-        "Save a durable fact about the user or their environment that will be useful in future conversations. Use for stable preferences, recurring context, names of machines/projects, and standing instructions — not for one-off details or anything the user asked you to forget.",
+          "Persist a durable fact about the user, their environment, or their standing preferences so it is available in ALL future conversations. This is long-term memory: write to it proactively the moment you learn something that would change how you respond to this person later — do NOT wait for the user to say 'remember this.'\n" +
+          "\n" +
+          "CALL THIS when what you learned is:\n" +
+          "- Durable — likely still true weeks or months from now (a stable preference, an ongoing project, a tool they rely on, a constraint they work under).\n" +
+          "- Personal to this user — about them, their setup, their work, their relationships, or how they want you to behave.\n" +
+          "- Reusable — would spare the user from re-explaining it, or would let you give a better answer, in a later unrelated conversation.\n" +
+          "\n" +
+          "Good things to remember:\n" +
+          "- 'The user self-hosts LLMs with llama.cpp on a Mac Studio with 192GB of unified memory.'\n" +
+          "- 'The user prefers concise answers with code first, explanation after.'\n" +
+          "- 'The user is a pediatric nurse named Sam who works night shifts.'\n" +
+          "- 'The user is designing a STM32 system-on-module electronics project called Pollux.'\n" +
+          "\n" +
+          "DO NOT call this for:\n" +
+          "- One-off or task-local details (a value being debugged right now, today's to-do list, a figure from the current chat).\n" +
+          "- Facts only relevant inside this single conversation.\n" +
+          "- Anything the user asked you not to save, or sensitive data they did not clearly want stored.\n" +
+          "- Information already in memory — only write when the fact is new or has changed.\n" +
+          "\n" +
+          "Decision test: 'If this same user starts a brand-new chat next month, would knowing this make me more helpful?' Yes → save it. No → skip it. When the answer is clearly yes, save without being asked.",
       parameters: {
         type: "object",
         properties: {
           content: {
             type: "string",
             description:
-              "The fact as a brief standalone statement, e.g. 'The user uses llama.cpp for running ai models.' or 'The user has a proxmox-based server named cuttlefish.'",
+                "EXTRACT the durable fact — do not merely transcribe what the user said. Rewrite into a self-contained statement in the third person, as a standing truth, dropping the user's narration, reasoning, hedging, and any 'now/lately/this conversation' framing. Keep the specifics that make it useful (names, versions, numbers); invent nothing and drop nothing essential. Usually one sentence; two at most.\n" +
+                "\n" +
+                "Example transformation:\n" +
+                "User says: 'yeah lately I've basically given up on Terraform, it's a nightmare, I just do everything through the Serverless framework now and deploy to Lambda'\n" +
+                "Save: 'The user deploys to AWS Lambda using the Serverless framework and avoids Terraform.'",
           },
           category: {
             type: "string",
+            enum: [
+              "preference",
+              "fact",
+              "project",
+              "person",
+              "environment",
+              "instruction",
+            ],
             description:
-              "Optional short grouping label, e.g. 'preference', 'fact'.",
+                "The single best-fitting category for this memory.",
           },
         },
-        required: ["content"],
+        required: ["content", "category"],
       },
     },
   },

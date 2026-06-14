@@ -14,7 +14,7 @@ export default function WorkspaceView({ workspaceId }: { workspaceId: string }) 
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-10">
+    <div className="mx-auto max-w-3xl px-4 py-8 md:px-6 md:py-10">
       <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-bronze-500">
         Workspace
       </div>

@@ -24,15 +24,15 @@ export default function SettingsView() {
   const [section, setSection] = useState<Section>("models");
 
   return (
-    <div className="flex h-full">
-      {/* Settings sidebar */}
-      <nav className="flex w-44 shrink-0 flex-col gap-0.5 border-r border-ink-700 bg-ink-950/40 p-2">
+    <div className="flex h-full flex-col md:flex-row">
+      {/* Settings nav — horizontal scroller on mobile, vertical sidebar on md+ */}
+      <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-ink-700 bg-ink-950/40 p-2 md:w-44 md:flex-col md:gap-0.5 md:border-b-0 md:border-r">
         {SECTIONS.map((s) => (
           <button
             key={s.id}
             onClick={() => setSection(s.id)}
             className={[
-              "rounded-md px-3 py-2 text-left text-sm transition-colors",
+              "shrink-0 whitespace-nowrap rounded-md px-3 py-2 text-left text-sm transition-colors md:shrink",
               section === s.id
                 ? "bg-ink-800 text-parchment-100"
                 : "text-parchment-400 hover:bg-ink-850 hover:text-parchment-100",
@@ -87,7 +87,7 @@ function ModelsSection() {
   const disabledSet = new Set(settings.disabledModels);
 
   return (
-    <div className="p-5">
+    <div className="p-4 md:p-5">
       <SectionHeading
         title="Endpoints"
         subtitle="Local llama.cpp servers or hosted OpenAI-compatible APIs (Groq, OpenAI, …). Add a key for hosted providers; local servers need none."
@@ -301,28 +301,30 @@ function EndpointCard({
 
   return (
     <div className="rounded-lg border border-ink-700 bg-ink-900 p-3">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <input
           value={name}
           onChange={(e) => onChange({ name: e.target.value })}
           placeholder="Name"
-          className="w-36 rounded-md border border-ink-700 bg-ink-850 px-2.5 py-1.5 text-sm text-parchment-100 focus:border-bronze-600 focus:outline-none"
+          className="w-full sm:w-36 rounded-md border border-ink-700 bg-ink-850 px-2.5 py-1.5 text-base sm:text-sm text-parchment-100 focus:border-bronze-600 focus:outline-none"
         />
-        <input
-          value={url}
-          onChange={(e) => onChange({ url: e.target.value })}
-          placeholder="http://localhost:8080"
-          spellCheck={false}
-          className="flex-1 rounded-md border border-ink-700 bg-ink-850 px-2.5 py-1.5 font-mono text-xs text-parchment-100 focus:border-bronze-600 focus:outline-none"
-        />
-        {canRemove && (
-          <ConfirmDelete
-            label="Remove endpoint"
-            message="Remove endpoint?"
-            onConfirm={onRemove}
-            stopPropagation={false}
+        <div className="flex flex-1 items-center gap-2">
+          <input
+            value={url}
+            onChange={(e) => onChange({ url: e.target.value })}
+            placeholder="http://localhost:8080"
+            spellCheck={false}
+            className="min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-850 px-2.5 py-1.5 font-mono text-xs text-parchment-100 focus:border-bronze-600 focus:outline-none"
           />
-        )}
+          {canRemove && (
+            <ConfirmDelete
+              label="Remove endpoint"
+              message="Remove endpoint?"
+              onConfirm={onRemove}
+              stopPropagation={false}
+            />
+          )}
+        </div>
       </div>
 
       <div className="mt-2 flex items-center gap-2">
@@ -428,12 +430,12 @@ function AddEndpoint({
         ))}
       </div>
 
-      <div className="mt-2 flex items-center gap-2">
+      <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Name"
-          className="w-36 rounded-md border border-ink-700 bg-ink-850 px-2.5 py-1.5 text-sm text-parchment-100 placeholder:text-parchment-600 focus:border-bronze-600 focus:outline-none"
+          className="w-full sm:w-36 rounded-md border border-ink-700 bg-ink-850 px-2.5 py-1.5 text-base sm:text-sm text-parchment-100 placeholder:text-parchment-600 focus:border-bronze-600 focus:outline-none"
         />
         <input
           value={url}
@@ -441,7 +443,7 @@ function AddEndpoint({
           onKeyDown={(e) => e.key === "Enter" && add()}
           placeholder="http://localhost:8080 or https://api.groq.com/openai/v1"
           spellCheck={false}
-          className="flex-1 rounded-md border border-ink-700 bg-ink-850 px-2.5 py-1.5 font-mono text-xs text-parchment-100 placeholder:text-parchment-600 focus:border-bronze-600 focus:outline-none"
+          className="min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-850 px-2.5 py-1.5 font-mono text-xs text-parchment-100 placeholder:text-parchment-600 focus:border-bronze-600 focus:outline-none"
         />
       </div>
 
@@ -525,7 +527,7 @@ function DefaultModelPicker({
 
 function SystemSection() {
   return (
-    <div className="p-5">
+    <div className="p-4 md:p-5">
       <SectionHeading
         title="Reasoning"
         subtitle="How Mimir surfaces model thinking."
@@ -565,7 +567,7 @@ function AccountSection() {
   const dirty = username.trim() !== settings.username;
 
   return (
-    <div className="p-5">
+    <div className="p-4 md:p-5">
       <SectionHeading
         title="Profile"
         subtitle="Shown in the sidebar. Local only — there are no accounts."

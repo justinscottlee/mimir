@@ -297,9 +297,9 @@ export default function ChatView({ conversationId }: { conversationId: string })
   const noModels = !loadingModels && models.length === 0;
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center gap-3 border-b border-ink-700 px-5 py-2.5">
-        <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-parchment-600">
+    <div className="flex h-full flex-col pb-3">
+      <div className="flex items-center gap-2 border-b border-ink-700 px-3 py-2.5 md:gap-3 md:px-5">
+        <span className="hidden font-mono text-[10px] uppercase tracking-[0.2em] text-parchment-600 sm:inline">
           Model
         </span>
         {loadingModels ? (
@@ -311,14 +311,14 @@ export default function ChatView({ conversationId }: { conversationId: string })
             onChange={(key) => setConversationModel(conversationId, key)}
           />
         ) : (
-          <span className="font-mono text-xs text-parchment-600">
+          <span className="truncate font-mono text-xs text-parchment-600">
             {noEndpoints ? "no endpoints configured" : "no models available"}
           </span>
         )}
         {(noModels || noEndpoints) && (
           <button
             onClick={() => openWindow("settings")}
-            className="ml-auto text-xs text-bronze-300 hover:underline"
+            className="ml-auto shrink-0 text-xs text-bronze-300 hover:underline"
           >
             Open Settings →
           </button>
@@ -327,7 +327,7 @@ export default function ChatView({ conversationId }: { conversationId: string })
 
       <div className="relative min-h-0 flex-1">
         <div ref={scrollRef} onScroll={handleScroll} className="h-full overflow-y-auto">
-          <div className="mx-auto flex max-w-4xl flex-col gap-6 px-5 py-6">
+          <div className="mx-auto flex max-w-4xl flex-col gap-6 px-3 py-5 md:px-5 md:py-6">
             {conversation.messages.length === 0 && (
               <p className="pt-16 text-center text-sm text-parchment-600">
                 Send a message to begin. No data will leave Mimir unless you use
@@ -396,11 +396,11 @@ function ModelSelect({
   const active = models.find((m) => m.key === value);
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex min-w-0 items-center gap-2">
       <select
         value={value ?? ""}
         onChange={(e) => onChange(e.target.value)}
-        className="max-w-[20rem] rounded-md border border-ink-700 bg-ink-850 px-2 py-1 font-mono text-xs text-parchment-100"
+        className="min-w-0 max-w-[55vw] rounded-md border border-ink-700 bg-ink-850 px-2 py-1 font-mono text-xs text-parchment-100 md:max-w-[20rem]"
       >
         {groups.length === 1
           ? groups[0].items.map((m) => (
@@ -458,7 +458,7 @@ const MessageRow = memo(
       >
         <div
           className={[
-            "max-w-[88%] min-w-0 rounded-lg px-4 py-2.5",
+            "max-w-[92%] min-w-0 md:max-w-[88%] rounded-lg px-4 py-2.5",
             isUser
               ? "whitespace-pre-wrap bg-bronze-600/20 text-sm leading-relaxed text-parchment-100"
               : "w-full border border-ink-700 bg-ink-900 text-parchment-100",
@@ -639,7 +639,7 @@ function ChatInput({
   }
 
   return (
-    <div className="px-5 pb-5 pt-1">
+    <div className="px-3 pb-3 pt-1 pb-safe md:px-5 md:pb-5">
       <div className="mx-auto flex max-w-4xl items-end gap-2 rounded-xl border border-ink-700 bg-ink-850 px-3 py-2 focus-within:border-bronze-600">
         <textarea
           ref={ref}
@@ -652,8 +652,8 @@ function ChatInput({
             }
           }}
           rows={1}
-          placeholder="Message the model… (Enter to send, Shift+Enter for a new line)"
-          className="max-h-72 min-h-[2.5rem] flex-1 resize-none bg-transparent px-1 py-2 text-sm leading-relaxed text-parchment-100 placeholder:text-parchment-600 focus:outline-none"
+          placeholder="Message the model…"
+          className="max-h-72 min-h-[2.5rem] flex-1 resize-none bg-transparent px-1 py-2 text-base leading-relaxed text-parchment-100 placeholder:text-parchment-600 focus:outline-none md:text-sm"
         />
         {streaming ? (
           <button

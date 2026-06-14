@@ -49,7 +49,7 @@ export default function MemoriesView() {
             }}
             rows={2}
             placeholder="A fact to remember, e.g. “Prefers concise answers and TypeScript examples.”"
-            className="resize-none rounded-md border border-ink-700 bg-ink-850 px-3 py-2 text-sm text-parchment-100 placeholder:text-parchment-600 focus:border-bronze-600 focus:outline-none"
+            className="resize-none rounded-md border border-ink-700 bg-ink-850 px-3 py-2 text-base md:text-sm text-parchment-100 placeholder:text-parchment-600 focus:border-bronze-600 focus:outline-none"
           />
           <div className="flex gap-2">
             <input

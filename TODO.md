@@ -1,7 +1,6 @@
-- add web search and web fetch tools (major ai task, use SEARXNG?)
+- add web search and web fetch tools (major ai task)
 - add backend database for persistent storage. likely postgresql. maybe redis as well? (major ai task maybe wait for fable 5 again)
 - implement user authentication and access controls (major ai task maybe wait for fable 5 again)
 - add a way to customize the system prompt? perhaps in a way that constructs a larger system prompt from smaller individual ones (like the memories or skills knowledge) (ai will do this, need to detail how it will work)
 - add tasks, this is somewhat agentic, maybe wait until the basics of workspace are implemented? have tasks run on a schedule, basically gives a agentic session a prompt to run periodically and may alter states I guess? for example: one that is intended to consolidate and delete duplicate or contradictory memories
-- make it so the dropdown when you click the plus in the tabs does not close if the model is generating text whhen you click it.
-- add mobile user interface (major ai evolution)
+- make it so generation doesn't halt when the browser tab closes

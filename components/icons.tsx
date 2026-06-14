@@ -27,6 +27,11 @@ export const IconPlus = (p: IconProps) => (
         <path d="M8 3.33V12.67M3.33 8H12.67" />
     </Svg>
 );
+export const IconMenu = (p: IconProps) => (
+    <Svg {...p}>
+        <path d="M2.5 4h11M2.5 8h11M2.5 12h11" />
+    </Svg>
+);
 export const IconChat = (p: IconProps) => (
     <Svg {...p}>
         <path d="M14 10C14 10.35 13.86 10.69 13.61 10.94C13.36 11.19 13.02 11.33 12.67 11.33H4.67L2 14V3.33C2 2.98 2.14 2.64 2.39 2.39C2.64 2.14 2.98 2 3.33 2H12.67C13.02 2 13.36 2.14 13.61 2.39C13.86 2.64 14 2.98 14 3.33V10Z" />

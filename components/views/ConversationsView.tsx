@@ -70,7 +70,7 @@ export default function ConversationsView() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search conversations…"
-            className="flex-1 bg-transparent text-sm text-parchment-100 placeholder:text-parchment-600 focus:outline-none"
+            className="flex-1 bg-transparent text-base md:text-sm text-parchment-100 placeholder:text-parchment-600 focus:outline-none"
           />
           {query && (
             <button

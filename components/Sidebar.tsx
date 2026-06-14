@@ -4,16 +4,24 @@ import { useMimir } from "@/lib/store";
 import {
   IconBox,
   IconChat,
+  IconClose,
   IconGear,
-  IconClock,
   IconPlus,
   IconSearch,
   IconCode,
-  IconWrench, IconMemoryRibbon, IconMemoryScroll, IconBriefcase, IconUser
+  IconWrench,
+  IconBriefcase,
+  IconUser,
 } from "./icons";
 import Image from "next/image"
 
-export default function Sidebar() {
+export default function Sidebar({
+  mobileOpen = false,
+  onClose,
+}: {
+  mobileOpen?: boolean;
+  onClose?: () => void;
+}) {
   const newConversation = useMimir((s) => s.newConversation);
   const newWorkspace = useMimir((s) => s.newWorkspace);
   const openWindow = useMimir((s) => s.openWindow);
@@ -23,23 +31,41 @@ export default function Sidebar() {
 
   const isOpen = (kind: string) => windows.some((w) => w.kind === kind);
 
+  // Wrap an action so tapping it also dismisses the mobile drawer.
+  const go = (fn: () => void) => () => {
+    fn();
+    onClose?.();
+  };
+
   return (
-    <aside className="flex w-56 shrink-0 flex-col border-r border-ink-700 bg-ink-900">
+    <aside
+      className={[
+        "z-50 flex w-56 shrink-0 flex-col border-r border-ink-700 bg-ink-900",
+        // Mobile: fixed off-canvas drawer that slides in. Desktop (md+): a
+        // normal static flex child that's always visible.
+        "max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:w-72 max-md:shadow-2xl",
+        "max-md:transition-transform max-md:duration-200 max-md:ease-out",
+        mobileOpen ? "max-md:translate-x-0" : "max-md:-translate-x-full",
+      ].join(" ")}
+    >
       {/* Brand */}
-      <div className="flex items-center gap-2.5 px-4 pb-4 pt-5 justify-center select-none">
-        <span className="w-10 h-10">
-          <img
-              src="/mimir-brand-logo.svg"
-              alt="brand logo"
-          />
+      <div className="relative flex select-none items-center justify-center gap-2.5 px-4 pb-4 pt-5">
+        <span className="h-10 w-10">
+          <img src="/mimir-brand-logo.svg" alt="brand logo" />
         </span>
 
         <span className="w-24">
-          <img
-              src="/mimir-brand-text.svg"
-              alt={"mimir"}
-          />
+          <img src="/mimir-brand-text.svg" alt={"mimir"} />
         </span>
+
+        {/* Close button — mobile drawer only */}
+        <button
+          onClick={onClose}
+          className="absolute right-2 top-3 rounded-md p-1.5 text-parchment-600 hover:bg-ink-800 hover:text-parchment-100 md:hidden"
+          aria-label="Close menu"
+        >
+          <IconClose className="h-4 w-4" />
+        </button>
       </div>
 
       {/* Actions */}
@@ -47,18 +73,18 @@ export default function Sidebar() {
         <SidebarButton
           label="New conversation"
           icon={<IconPlus />}
-          onClick={newConversation}
+          onClick={go(newConversation)}
         />
         <SidebarButton
           label="New workspace"
           icon={<IconPlus />}
-          onClick={newWorkspace}
+          onClick={go(newWorkspace)}
         />
         <SidebarButton
           label="Search"
           icon={<IconSearch />}
           hint="CTRL K"
-          onClick={() => setSearchOpen(true)}
+          onClick={go(() => setSearchOpen(true))}
         />
       </div>
 
@@ -68,13 +94,13 @@ export default function Sidebar() {
           label="Conversations"
           icon={<IconChat />}
           active={isOpen("conversations")}
-          onClick={() => openWindow("conversations")}
+          onClick={go(() => openWindow("conversations"))}
         />
         <SidebarButton
           label="Workspaces"
           icon={<IconBox />}
           active={isOpen("workspaces")}
-          onClick={() => openWindow("workspaces")}
+          onClick={go(() => openWindow("workspaces"))}
         />
       </nav>
 
@@ -84,19 +110,19 @@ export default function Sidebar() {
           label="Memories"
           icon={<IconBriefcase />}
           active={isOpen("memories")}
-          onClick={() => openWindow("memories")}
+          onClick={go(() => openWindow("memories"))}
         />
         <SidebarButton
           label="Skills"
           icon={<IconCode />}
           active={isOpen("skills")}
-          onClick={() => openWindow("skills")}
+          onClick={go(() => openWindow("skills"))}
         />
         <SidebarButton
           label="Tools"
           icon={<IconWrench />}
           active={isOpen("tools")}
-          onClick={() => openWindow("tools")}
+          onClick={go(() => openWindow("tools"))}
         />
       </nav>
 
@@ -111,7 +137,7 @@ export default function Sidebar() {
           {username}
         </span>
         <button
-          onClick={() => openWindow("settings")}
+          onClick={go(() => openWindow("settings"))}
           className="rounded-md p-1.5 text-parchment-600 transition-colors hover:bg-ink-800 hover:text-parchment-100"
           title="Settings"
           aria-label="Settings"

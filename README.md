@@ -85,6 +85,24 @@ from `/v1/chat/completions`.
   content, same as the global ⌘K search) and a Select mode for multi-select —
   tick several conversations and delete them all behind a single confirmation.
 
+### Responsive / mobile
+
+The interface adapts below the `md` breakpoint (768px):
+
+- The left sidebar collapses into an off-canvas drawer, opened by a hamburger
+  button at the left of the tab bar and dismissed by tapping the backdrop, the
+  close button, or any action inside it.
+- Manager pages (Conversations, Settings, …) open as full-screen sheets
+  instead of draggable/resizable windows — only the focused one shows, and it's
+  closed with the header's ✕. Dragging and resizing are desktop-only.
+- Settings switches from a two-column layout to a stacked one with a horizontal
+  section selector.
+- The chat header, message column, and composer use tighter gutters; tab close
+  buttons are always visible (no hover on touch); inputs render at 16px to
+  avoid iOS focus-zoom; and the app uses the dynamic viewport height (`dvh`)
+  with safe-area padding so the composer isn't hidden behind mobile browser
+  chrome or a notch.
+
 ## Chat features
 
 - Assistant messages render markdown (GFM): bold, tables, lists, blockquotes,
