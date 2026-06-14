@@ -169,14 +169,48 @@ after each tool runs.
 
 Tools live in a registry: `{ name -> { def, run } }`. `def` is the schema
 advertised to the model; `run(args)` executes and returns a string fed back
-as the result. Adding a capability — web search, file read/write — means
-adding one registry entry; the loop is tool-agnostic and unchanged. `remember`
-is the first entry (`rememberTool` in `lib/memory.ts`), wired to the store so
-the write stays owned by Mimir.
+as the result. Adding a capability means adding one registry entry; the loop
+is tool-agnostic and unchanged. The registry is assembled per response in
+`ChatView`, so a tool can be omitted when its switch is off. `remember`
+(`rememberTool` in `lib/memory.ts`) is wired to the store so the write stays
+owned by Mimir.
 
-Manage them in the Memories window: add, edit (click the text), toggle
+Manage memories in the Memories window: add, edit (click the text), toggle
 on/off (checkbox), delete. `lib/memory.ts` is the single source for both the
 tool schema and the injection prompt.
+
+## Web tools
+
+Two tools give the model reach beyond its training data (`lib/webtools.ts`):
+
+- **`web_search`** — the model emits a query; Mimir forwards it to a
+  self-hosted [SearXNG](https://github.com/searxng/searxng) instance and hands
+  back the ranked results (title, URL, snippet). Discovery only.
+- **`web_fetch`** — downloads a single URL and returns its readable text, so
+  the model can read a result (or a link you pasted) in full.
+
+Both calls go out server-side through `/api/websearch` and `/api/webfetch`, so
+the browser keeps talking only to Mimir (same shape as the llama proxy). The
+only things that leave the machine are the search query (to your SearXNG) and
+any URL the model chooses to fetch — and both are visible in the inline tool
+chip, so every outbound call is auditable.
+
+Run SearXNG with the bundled compose file (`docker compose up -d searxng`,
+exposed on `:8888`). Its `settings.yml` enables the `json` format that
+`web_search` needs.
+
+**Configuration (Tools window).** Each tool has a master on/off switch.
+Web search exposes the SearXNG URL, result count, and safe-search level; web
+fetch exposes the max characters returned. The built-ins (`remember`,
+`load_skill`) can be toggled too, but stay fully local. Web tools ship
+**disabled** — enabling them is the one explicit, visible choice that lets a
+query leave the machine.
+
+**Per-conversation switch.** A "Web search" toggle sits above the chat input.
+Once web tools are enabled globally it controls whether they're offered in
+*this* conversation (defaults on; flip it off to keep one chat fully local).
+The per-conversation state lives on the conversation (`webToolsEnabled`); when
+web tools are disabled globally the button is muted and opens the Tools window.
 
 ## Skills
 
@@ -200,7 +234,6 @@ parser, discovery prompt, and tool.
 
 - **Workspaces** — agentic container concept; also the home of the future
   script-execution sandbox skills will use.
-- **Tools** — manager window with planned-feature notes.
 
 ## Ideas for next steps
 

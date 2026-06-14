@@ -83,6 +83,14 @@ export interface Conversation {
   messages: Message[];
   createdAt: number;
   updatedAt: number;
+  /**
+   * Per-conversation switch for the web tools (web_search / web_fetch),
+   * toggled by the button above the chat input. When undefined it inherits
+   * "on" as long as the tools are enabled globally in the Tools window. Set
+   * explicitly to false to keep a single conversation fully local even while
+   * web access is enabled elsewhere.
+   */
+  webToolsEnabled?: boolean;
 }
 
 export interface Workspace {
@@ -133,6 +141,47 @@ export function parseModelKey(key: string): ModelRef | null {
   return { endpointId: key.slice(0, idx), modelId: key.slice(idx + 2) };
 }
 
+/**
+ * Configuration for the web_search tool. Search runs against a self-hosted
+ * SearXNG instance: the model emits a query, Mimir forwards it to SearXNG's
+ * JSON API, and the ranked results come back. Nothing about your prompt leaves
+ * the machine except the search query you can see in the tool chip.
+ */
+export interface WebSearchConfig {
+  /** Master switch — when false the tool is never advertised to the model. */
+  enabled: boolean;
+  /** Base URL of the SearXNG instance, e.g. http://localhost:8888 */
+  searxngUrl: string;
+  /** How many results to hand back to the model (1–10). */
+  maxResults: number;
+  /** SearXNG safe-search level: 0 off, 1 moderate, 2 strict. */
+  safeSearch: 0 | 1 | 2;
+}
+
+/**
+ * Configuration for the web_fetch tool, which downloads a single URL and
+ * returns its readable text so the model can read a page in full.
+ */
+export interface WebFetchConfig {
+  /** Master switch — when false the tool is never advertised to the model. */
+  enabled: boolean;
+  /** Cap on characters of extracted text returned to the model. */
+  maxChars: number;
+}
+
+/** On/off switches for the always-local built-in tools. */
+export interface BuiltinToolToggles {
+  remember: boolean;
+  loadSkill: boolean;
+}
+
+/** All tool configuration, surfaced in the Tools window. */
+export interface ToolSettings {
+  webSearch: WebSearchConfig;
+  webFetch: WebFetchConfig;
+  builtins: BuiltinToolToggles;
+}
+
 export interface Settings {
   /** Configured llama.cpp servers. */
   endpoints: Endpoint[];
@@ -143,6 +192,8 @@ export interface Settings {
   /** Default model key for new workspaces. */
   defaultWorkspaceModel?: string;
   username: string;
+  /** Tool availability and parameters (web search/fetch, built-ins). */
+  tools: ToolSettings;
 }
 
 /**

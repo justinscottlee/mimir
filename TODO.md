@@ -1,4 +1,3 @@
-- add web search and web fetch tools (major ai task)
 - add backend database for persistent storage. likely postgresql. maybe redis as well? (major ai task maybe wait for fable 5 again)
 - implement user authentication and access controls (major ai task maybe wait for fable 5 again)
 - add a way to customize the system prompt? perhaps in a way that constructs a larger system prompt from smaller individual ones (like the memories or skills knowledge) (ai will do this, need to detail how it will work)

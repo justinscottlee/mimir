@@ -181,3 +181,9 @@ export const IconGear = (p: IconProps) => (
         <circle cx="8" cy="8" r="2.1" />
     </Svg>
 );
+export const IconGlobe = (p: IconProps) => (
+    <Svg {...p}>
+        <circle cx="8" cy="8" r="6.33" />
+        <path d="M1.67 8H14.33M8 1.67C9.67 3.5 10.5 5.7 10.5 8C10.5 10.3 9.67 12.5 8 14.33C6.33 12.5 5.5 10.3 5.5 8C5.5 5.7 6.33 3.5 8 1.67Z" />
+    </Svg>
+);

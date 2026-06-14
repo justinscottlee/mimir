@@ -12,6 +12,7 @@ import {
 import { Message, ResolvedModel, ToolEventRecord } from "@/lib/types";
 import { buildMemoryPrompt, rememberTool } from "@/lib/memory";
 import { buildSkillsPrompt, loadSkillTool } from "@/lib/skills";
+import { webFetchTool, webSearchTool } from "@/lib/webtools";
 import { runToolLoop, ToolEvent, ToolRegistry } from "@/lib/tools";
 import { parseTranscript } from "@/lib/transcript";
 import * as Icons from "../icons";
@@ -29,6 +30,7 @@ export default function ChatView({ conversationId }: { conversationId: string })
   const setConversationTitle = useMimir((s) => s.setConversationTitle);
   const openWindow = useMimir((s) => s.openWindow);
   const addMemory = useMimir((s) => s.addMemory);
+  const setConversationWebTools = useMimir((s) => s.setConversationWebTools);
 
   const [loads, setLoads] = useState<EndpointLoad[]>([]);
   const [loadingModels, setLoadingModels] = useState(true);
@@ -137,17 +139,32 @@ export default function ChatView({ conversationId }: { conversationId: string })
       const controller = new AbortController();
       abortRef.current = controller;
 
-      const registry: ToolRegistry = {
-        remember: rememberTool((content, category) => {
+      // Build the tool registry from current settings. A tool only appears if
+      // its master switch is on; the two web tools additionally require this
+      // conversation's web toggle to be on (defaults to on once enabled).
+      const toolSettings = state.settings.tools;
+      const webOn = current?.webToolsEnabled ?? true;
+      const registry: ToolRegistry = {};
+
+      if (toolSettings.builtins.remember) {
+        registry.remember = rememberTool((content, category) => {
           addMemory(content, { category, source: "auto" });
-        }),
-        load_skill: loadSkillTool((name) => {
+        });
+      }
+      if (toolSettings.builtins.loadSkill) {
+        registry.load_skill = loadSkillTool((name) => {
           const match = Object.values(useMimir.getState().skills).find(
             (s) => s.name === name
           );
           return match ?? null;
-        }),
-      };
+        });
+      }
+      if (toolSettings.webSearch.enabled && webOn) {
+        registry.web_search = webSearchTool(toolSettings.webSearch);
+      }
+      if (toolSettings.webFetch.enabled && webOn) {
+        registry.web_fetch = webFetchTool(toolSettings.webFetch);
+      }
 
       const memoryPrompt = buildMemoryPrompt(
         Object.values(useMimir.getState().memories)
@@ -296,6 +313,13 @@ export default function ChatView({ conversationId }: { conversationId: string })
   const noEndpoints = settings.endpoints.length === 0;
   const noModels = !loadingModels && models.length === 0;
 
+  // Web tools state for the input-bar toggle. "Available" means at least one
+  // web tool is enabled globally in the Tools window; "on" is this
+  // conversation's switch (defaults on once available).
+  const webToolsAvailable =
+    settings.tools.webSearch.enabled || settings.tools.webFetch.enabled;
+  const webToolsOn = conversation.webToolsEnabled ?? true;
+
   return (
     <div className="flex h-full flex-col pb-3">
       <div className="flex items-center gap-2 border-b border-ink-700 px-3 py-2.5 md:gap-3 md:px-5">
@@ -368,6 +392,12 @@ export default function ChatView({ conversationId }: { conversationId: string })
         onSend={send}
         onStop={stop}
         onResize={() => scrollToBottom()}
+        webToolsAvailable={webToolsAvailable}
+        webToolsOn={webToolsOn}
+        onToggleWebTools={() =>
+          setConversationWebTools(conversationId, !webToolsOn)
+        }
+        onOpenTools={() => openWindow("tools")}
       />
     </div>
   );
@@ -609,11 +639,19 @@ function ChatInput({
   onSend,
   onStop,
   onResize,
+  webToolsAvailable,
+  webToolsOn,
+  onToggleWebTools,
+  onOpenTools,
 }: {
   streaming: boolean;
   onSend: (text: string) => void;
   onStop: () => void;
   onResize: () => void;
+  webToolsAvailable: boolean;
+  webToolsOn: boolean;
+  onToggleWebTools: () => void;
+  onOpenTools: () => void;
 }) {
   const [value, setValue] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -640,43 +678,113 @@ function ChatInput({
 
   return (
     <div className="px-3 pb-3 pt-1 pb-safe md:px-5 md:pb-5">
-      <div className="mx-auto flex max-w-4xl items-end gap-2 rounded-xl border border-ink-700 bg-ink-850 px-3 py-2 focus-within:border-bronze-600">
-        <textarea
-          ref={ref}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          rows={1}
-          placeholder="Message the model…"
-          className="max-h-72 min-h-[2.5rem] flex-1 resize-none bg-transparent px-1 py-2 text-base leading-relaxed text-parchment-100 placeholder:text-parchment-600 focus:outline-none md:text-sm"
-        />
-        {streaming ? (
-          <button
-            onClick={onStop}
-            className="mb-1 flex h-9 w-9 items-center justify-center rounded-lg bg-ink-700 text-parchment-100 transition-colors hover:bg-ink-800"
-            title="Stop generating"
-            aria-label="Stop generating"
-          >
-            <Icons.IconStop />
-          </button>
-        ) : (
-          <button
-            onClick={submit}
-            disabled={!value.trim()}
-            className="mb-1 flex h-9 w-9 items-center justify-center rounded-lg bg-bronze-500 text-ink-950 transition-colors hover:bg-bronze-400 disabled:opacity-30"
-            title="Send"
-            aria-label="Send"
-          >
-            <Icons.IconSend />
-          </button>
-        )}
+      <div className="mx-auto max-w-4xl">
+        <div className="mb-1.5 flex items-center gap-2 px-1">
+          <WebToolsToggle
+            available={webToolsAvailable}
+            on={webToolsOn}
+            onToggle={onToggleWebTools}
+            onOpenTools={onOpenTools}
+          />
+        </div>
+        <div className="flex items-end gap-2 rounded-xl border border-ink-700 bg-ink-850 px-3 py-2 focus-within:border-bronze-600">
+          <textarea
+            ref={ref}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+            rows={1}
+            placeholder="Message the model…"
+            className="max-h-72 min-h-[2.5rem] flex-1 resize-none bg-transparent px-1 py-2 text-base leading-relaxed text-parchment-100 placeholder:text-parchment-600 focus:outline-none md:text-sm"
+          />
+          {streaming ? (
+            <button
+              onClick={onStop}
+              className="mb-1 flex h-9 w-9 items-center justify-center rounded-lg bg-ink-700 text-parchment-100 transition-colors hover:bg-ink-800"
+              title="Stop generating"
+              aria-label="Stop generating"
+            >
+              <Icons.IconStop />
+            </button>
+          ) : (
+            <button
+              onClick={submit}
+              disabled={!value.trim()}
+              className="mb-1 flex h-9 w-9 items-center justify-center rounded-lg bg-bronze-500 text-ink-950 transition-colors hover:bg-bronze-400 disabled:opacity-30"
+              title="Send"
+              aria-label="Send"
+            >
+              <Icons.IconSend />
+            </button>
+          )}
+        </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * The web-search switch that sits above the chat input. Three states:
+ *   - web tools enabled globally + on for this chat  → lit (bronze)
+ *   - web tools enabled globally + off for this chat → muted, click to enable
+ *   - web tools disabled globally                    → "off", click opens Tools
+ */
+function WebToolsToggle({
+  available,
+  on,
+  onToggle,
+  onOpenTools,
+}: {
+  available: boolean;
+  on: boolean;
+  onToggle: () => void;
+  onOpenTools: () => void;
+}) {
+  if (!available) {
+    return (
+      <button
+        onClick={onOpenTools}
+        title="Web search is off — click to enable it in the Tools window"
+        className="flex items-center gap-1.5 rounded-full border border-ink-700 bg-ink-850 px-2.5 py-1 text-xs text-parchment-600 transition-colors hover:border-parchment-600 hover:text-parchment-400"
+      >
+        <Icons.IconGlobe className="h-4 w-4" />
+        <span>Web search off</span>
+      </button>
+    );
+  }
+
+  const active = on;
+  return (
+    <button
+      role="switch"
+      aria-checked={active}
+      onClick={onToggle}
+      title={
+        active
+          ? "Web search on for this conversation — click to turn off"
+          : "Web search off for this conversation — click to turn on"
+      }
+      className={[
+        "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors",
+        active
+          ? "border-bronze-600/60 bg-bronze-600/15 text-bronze-300 hover:bg-bronze-600/25"
+          : "border-ink-700 bg-ink-850 text-parchment-600 hover:border-parchment-600 hover:text-parchment-400",
+      ].join(" ")}
+    >
+      <Icons.IconGlobe className="h-4 w-4" />
+      <span>Web search</span>
+      <span
+        className={[
+          "ml-0.5 inline-block h-1.5 w-1.5 rounded-full",
+          active ? "bg-bronze-400" : "bg-ink-700",
+        ].join(" ")}
+      />
+    </button>
   );
 }
 
@@ -893,6 +1001,23 @@ function describeTool(event: ToolEventRecord): string {
   if (event.name === "load_skill") {
     const n = event.args.name;
     return typeof n === "string" ? `loaded ${n}` : "loaded a skill";
+  }
+  if (event.name === "web_search") {
+    const q = event.args.query;
+    return typeof q === "string"
+      ? `searched “${q.length > 40 ? q.slice(0, 40) + "…" : q}”`
+      : "searched the web";
+  }
+  if (event.name === "web_fetch") {
+    const u = event.args.url;
+    if (typeof u === "string") {
+      try {
+        return `fetched ${new URL(u).hostname}`;
+      } catch {
+        return "fetched a page";
+      }
+    }
+    return "fetched a page";
   }
   return "";
 }

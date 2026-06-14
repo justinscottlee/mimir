@@ -12,6 +12,7 @@ import {
   Skill,
   Tab,
   TabKind,
+  ToolSettings,
   WindowKind,
   WindowSizeSpec,
   Workspace,
@@ -24,6 +25,29 @@ export function uid(prefix = ""): string {
     Math.random().toString(36).slice(2, 8)
   );
 }
+
+/**
+ * Defaults for tool configuration. Web tools ship disabled — they're the one
+ * capability that can send a query off the machine (to your SearXNG and, from
+ * there, the open web), so enabling them is an explicit, visible choice made in
+ * the Tools window. Built-ins stay local and are on by default.
+ */
+export const DEFAULT_TOOL_SETTINGS: ToolSettings = {
+  webSearch: {
+    enabled: false,
+    searxngUrl: "http://localhost:8888",
+    maxResults: 5,
+    safeSearch: 1,
+  },
+  webFetch: {
+    enabled: false,
+    maxChars: 8000,
+  },
+  builtins: {
+    remember: true,
+    loadSkill: true,
+  },
+};
 
 /** Default + min/max sizes for each window kind, used for resizing. */
 export const WINDOW_SPECS: Record<WindowKind, WindowSizeSpec> = {
@@ -111,7 +135,18 @@ interface MimirState {
   updateEndpoint: (id: string, patch: Partial<Omit<Endpoint, "id">>) => void;
   removeEndpoint: (id: string) => void;
   setModelDisabled: (modelKey: string, disabled: boolean) => void;
+  /** Deep-merges a patch into the tool settings (web search/fetch, built-ins). */
+  updateToolSettings: (patch: PartialToolSettings) => void;
+  /** Per-conversation on/off for the web tools (the chat input toggle). */
+  setConversationWebTools: (conversationId: string, enabled: boolean) => void;
   setSearchOpen: (open: boolean) => void;
+}
+
+/** A shallow-per-section patch shape for updateToolSettings. */
+export interface PartialToolSettings {
+  webSearch?: Partial<ToolSettings["webSearch"]>;
+  webFetch?: Partial<ToolSettings["webFetch"]>;
+  builtins?: Partial<ToolSettings["builtins"]>;
 }
 
 export const useMimir = create<MimirState>()(
@@ -131,6 +166,7 @@ export const useMimir = create<MimirState>()(
         ],
         disabledModels: [],
         username: "admin",
+        tools: DEFAULT_TOOL_SETTINGS,
       },
       searchOpen: false,
 
@@ -609,11 +645,38 @@ export const useMimir = create<MimirState>()(
           };
         }),
 
+      updateToolSettings: (patch) =>
+        set((s) => {
+          const cur = s.settings.tools;
+          return {
+            settings: {
+              ...s.settings,
+              tools: {
+                webSearch: { ...cur.webSearch, ...(patch.webSearch ?? {}) },
+                webFetch: { ...cur.webFetch, ...(patch.webFetch ?? {}) },
+                builtins: { ...cur.builtins, ...(patch.builtins ?? {}) },
+              },
+            },
+          };
+        }),
+
+      setConversationWebTools: (conversationId, enabled) =>
+        set((s) => {
+          const conv = s.conversations[conversationId];
+          if (!conv) return s;
+          return {
+            conversations: {
+              ...s.conversations,
+              [conversationId]: { ...conv, webToolsEnabled: enabled },
+            },
+          };
+        }),
+
       setSearchOpen: (open) => set({ searchOpen: open }),
     }),
     {
       name: "mimir-store",
-      version: 3,
+      version: 4,
       migrate: (persisted: unknown, version) => {
         const state = persisted as Partial<MimirState> & {
           tabs?: { kind: string; refId?: string }[];
@@ -650,6 +713,14 @@ export const useMimir = create<MimirState>()(
             disabledModels: old.disabledModels ?? [],
             username: old.username ?? "admin",
           } as Settings;
+        }
+        if (version < 4) {
+          // v3 had no tool settings; backfill with defaults (web tools off).
+          const settings = (state.settings ?? {}) as Partial<Settings>;
+          if (!settings.tools) {
+            settings.tools = DEFAULT_TOOL_SETTINGS;
+          }
+          state.settings = settings as Settings;
         }
         return state as MimirState;
       },
