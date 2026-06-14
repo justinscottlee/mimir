@@ -16,6 +16,7 @@ export type WindowKind =
   | "memories"
   | "skills"
   | "tools"
+  | "systemPrompt"
   | "settings";
 
 export interface FloatingWindow {
@@ -241,6 +242,34 @@ export interface Skill {
   scripts: string[];
   /** When false, the skill is hidden from the model's discovery menu. */
   enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * A reusable chunk of system-prompt text. Active prompts are concatenated and
+ * sent ahead of the conversation, alongside the auto-generated memory and
+ * skill prompts. Two flavors:
+ *
+ *  - source "preset": backed by a generator in lib/systemPrompts.ts, keyed by
+ *    `presetKey`. The body is produced fresh at send time (e.g. the current
+ *    date), so it can be dynamic. Presets can be enabled/disabled but not
+ *    edited or deleted.
+ *  - source "user": a custom prompt whose `body` is the literal text. Fully
+ *    editable and deletable, toggled on/off like a skill.
+ */
+export interface SystemPrompt {
+  id: string;
+  /** Short label shown in the manager and the transparency view. */
+  name: string;
+  /** One-line explanation of what it does. */
+  description?: string;
+  /** For presets: the generator key in lib/systemPrompts.ts. */
+  presetKey?: string;
+  /** Literal text for custom prompts; ignored for presets (generated). */
+  body: string;
+  enabled: boolean;
+  source: "preset" | "user";
   createdAt: number;
   updatedAt: number;
 }

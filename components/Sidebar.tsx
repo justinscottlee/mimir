@@ -10,6 +10,7 @@ import {
   IconSearch,
   IconCode,
   IconWrench,
+  IconDoc,
   IconBriefcase,
   IconUser,
 } from "./icons";
@@ -123,6 +124,12 @@ export default function Sidebar({
           icon={<IconWrench />}
           active={isOpen("tools")}
           onClick={go(() => openWindow("tools"))}
+        />
+        <SidebarButton
+          label="System Prompt"
+          icon={<IconDoc />}
+          active={isOpen("systemPrompt")}
+          onClick={go(() => openWindow("systemPrompt"))}
         />
       </nav>
 

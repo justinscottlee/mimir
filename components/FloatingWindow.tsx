@@ -10,6 +10,7 @@ import WorkspacesView from "./views/WorkspacesView";
 import MemoriesView from "./views/MemoriesView";
 import SkillsView from "./views/SkillsView";
 import ToolsView from "./views/ToolsView";
+import SystemPromptView from "./views/SystemPromptView";
 import SettingsView from "./views/SettingsView";
 
 const WINDOW_TITLES: Record<WindowKind, string> = {
@@ -18,6 +19,7 @@ const WINDOW_TITLES: Record<WindowKind, string> = {
   memories: "Memories",
   skills: "Skills",
   tools: "Tools",
+  systemPrompt: "System Prompt",
   settings: "Settings",
 };
 
@@ -221,6 +223,8 @@ function WindowContent({ kind }: { kind: WindowKind }) {
       return <SkillsView />;
     case "tools":
       return <ToolsView />;
+    case "systemPrompt":
+      return <SystemPromptView />;
     case "settings":
       return <SettingsView />;
   }

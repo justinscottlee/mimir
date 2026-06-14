@@ -10,8 +10,9 @@ import {
   describeModelKey,
 } from "@/lib/models";
 import { Message, ResolvedModel, ToolEventRecord } from "@/lib/types";
-import { buildMemoryPrompt, rememberTool } from "@/lib/memory";
-import { buildSkillsPrompt, loadSkillTool } from "@/lib/skills";
+import { rememberTool } from "@/lib/memory";
+import { loadSkillTool } from "@/lib/skills";
+import { buildSystemSegments, joinSegments } from "@/lib/systemPrompts";
 import { webFetchTool, webSearchTool } from "@/lib/webtools";
 import { runToolLoop, ToolEvent, ToolRegistry } from "@/lib/tools";
 import { parseTranscript } from "@/lib/transcript";
@@ -166,14 +167,12 @@ export default function ChatView({ conversationId }: { conversationId: string })
         registry.web_fetch = webFetchTool(toolSettings.webFetch);
       }
 
-      const memoryPrompt = buildMemoryPrompt(
-        Object.values(useMimir.getState().memories)
-      );
-      const skillsPrompt = buildSkillsPrompt(
-        Object.values(useMimir.getState().skills)
-      );
-      const system =
-        [memoryPrompt, skillsPrompt].filter(Boolean).join("\n\n") || undefined;
+      const segments = buildSystemSegments({
+        systemPrompts: Object.values(useMimir.getState().systemPrompts),
+        memories: Object.values(useMimir.getState().memories),
+        skills: Object.values(useMimir.getState().skills),
+      });
+      const system = joinSegments(segments);
 
       let thinkStartedAt: number | null = null;
       let thinkingMs = 0;

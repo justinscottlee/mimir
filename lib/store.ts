@@ -10,6 +10,7 @@ import {
   Message,
   Settings,
   Skill,
+  SystemPrompt,
   Tab,
   TabKind,
   ToolSettings,
@@ -17,6 +18,7 @@ import {
   WindowSizeSpec,
   Workspace,
 } from "./types";
+import { SYSTEM_PROMPT_PRESETS } from "./systemPrompts";
 
 export function uid(prefix = ""): string {
   return (
@@ -49,6 +51,48 @@ export const DEFAULT_TOOL_SETTINGS: ToolSettings = {
   },
 };
 
+/**
+ * Builds the seed set of system-prompt records from the preset catalog. Run on
+ * first launch and reconciled on migration so new presets appear over time.
+ * "current_date" starts enabled because it solves the most common failure mode
+ * (the model assuming its training-time present is now); the rest are opt-in.
+ *
+ * Existing records are preserved so a user's enable/disable choices and custom
+ * prompts survive reconciliation.
+ */
+export function seedSystemPrompts(
+  existing: Record<string, SystemPrompt> = {}
+): Record<string, SystemPrompt> {
+  const out: Record<string, SystemPrompt> = { ...existing };
+  const now = Date.now();
+  SYSTEM_PROMPT_PRESETS.forEach((preset, i) => {
+    const id = `sysp_preset_${preset.key}`;
+    if (out[id]) {
+      // Keep the user's enabled choice; refresh name/description from catalog.
+      out[id] = {
+        ...out[id],
+        name: preset.name,
+        description: preset.description,
+        presetKey: preset.key,
+        source: "preset",
+      };
+      return;
+    }
+    out[id] = {
+      id,
+      name: preset.name,
+      description: preset.description,
+      presetKey: preset.key,
+      body: "",
+      enabled: preset.key === "current_date",
+      source: "preset",
+      createdAt: now + i,
+      updatedAt: now + i,
+    };
+  });
+  return out;
+}
+
 /** Default + min/max sizes for each window kind, used for resizing. */
 export const WINDOW_SPECS: Record<WindowKind, WindowSizeSpec> = {
   conversations: { defaultW: 680, defaultH: 540, minW: 420, minH: 320, maxW: 1100, maxH: 900 },
@@ -56,6 +100,7 @@ export const WINDOW_SPECS: Record<WindowKind, WindowSizeSpec> = {
   memories: { defaultW: 580, defaultH: 540, minW: 420, minH: 360, maxW: 900, maxH: 880 },
   skills: { defaultW: 620, defaultH: 580, minW: 460, minH: 380, maxW: 1000, maxH: 900 },
   tools: { defaultW: 560, defaultH: 460, minW: 420, minH: 320, maxW: 900, maxH: 820 },
+  systemPrompt: { defaultW: 640, defaultH: 600, minW: 460, minH: 380, maxW: 1000, maxH: 900 },
   settings: { defaultW: 760, defaultH: 600, minW: 560, minH: 420, maxW: 1100, maxH: 900 },
 };
 
@@ -68,6 +113,7 @@ interface MimirState {
   workspaces: Record<string, Workspace>;
   memories: Record<string, Memory>;
   skills: Record<string, Skill>;
+  systemPrompts: Record<string, SystemPrompt>;
   settings: Settings;
   searchOpen: boolean;
 
@@ -129,6 +175,19 @@ interface MimirState {
   deleteSkill: (id: string) => void;
   toggleSkill: (id: string) => void;
 
+  // System prompts
+  addSystemPrompt: (prompt: {
+    name: string;
+    description?: string;
+    body: string;
+  }) => string;
+  updateSystemPrompt: (
+    id: string,
+    patch: Partial<Omit<SystemPrompt, "id" | "source" | "presetKey">>
+  ) => void;
+  deleteSystemPrompt: (id: string) => void;
+  toggleSystemPrompt: (id: string) => void;
+
   // Settings / UI
   setSettings: (patch: Partial<Settings>) => void;
   addEndpoint: (name: string, url: string, apiKey?: string, manualModels?: string[]) => string;
@@ -160,6 +219,7 @@ export const useMimir = create<MimirState>()(
       workspaces: {},
       memories: {},
       skills: {},
+      systemPrompts: seedSystemPrompts(),
       settings: {
         endpoints: [
           { id: "ep_default", name: "Local", url: "http://localhost:8080" },
@@ -579,6 +639,64 @@ export const useMimir = create<MimirState>()(
           };
         }),
 
+      // ---------- System prompts ----------
+
+      addSystemPrompt: (prompt) => {
+        const id = uid("sysp_");
+        const now = Date.now();
+        const record: SystemPrompt = {
+          id,
+          name: prompt.name.trim() || "Untitled prompt",
+          description: prompt.description?.trim() || undefined,
+          body: prompt.body,
+          enabled: true,
+          source: "user",
+          createdAt: now,
+          updatedAt: now,
+        };
+        set((s) => ({ systemPrompts: { ...s.systemPrompts, [id]: record } }));
+        return id;
+      },
+
+      updateSystemPrompt: (id, patch) =>
+        set((s) => {
+          const prompt = s.systemPrompts[id];
+          if (!prompt) return s;
+          // Presets are generated; only their enabled flag is mutable.
+          const safePatch =
+            prompt.source === "preset"
+              ? { enabled: patch.enabled ?? prompt.enabled }
+              : patch;
+          return {
+            systemPrompts: {
+              ...s.systemPrompts,
+              [id]: { ...prompt, ...safePatch, updatedAt: Date.now() },
+            },
+          };
+        }),
+
+      deleteSystemPrompt: (id) =>
+        set((s) => {
+          const prompt = s.systemPrompts[id];
+          // Presets can't be deleted — disable them instead.
+          if (!prompt || prompt.source === "preset") return s;
+          const systemPrompts = { ...s.systemPrompts };
+          delete systemPrompts[id];
+          return { systemPrompts };
+        }),
+
+      toggleSystemPrompt: (id) =>
+        set((s) => {
+          const prompt = s.systemPrompts[id];
+          if (!prompt) return s;
+          return {
+            systemPrompts: {
+              ...s.systemPrompts,
+              [id]: { ...prompt, enabled: !prompt.enabled, updatedAt: Date.now() },
+            },
+          };
+        }),
+
       // ---------- Settings / UI ----------
 
       setSettings: (patch) =>
@@ -676,7 +794,7 @@ export const useMimir = create<MimirState>()(
     }),
     {
       name: "mimir-store",
-      version: 4,
+      version: 5,
       migrate: (persisted: unknown, version) => {
         const state = persisted as Partial<MimirState> & {
           tabs?: { kind: string; refId?: string }[];
@@ -722,6 +840,13 @@ export const useMimir = create<MimirState>()(
           }
           state.settings = settings as Settings;
         }
+        if (version < 5) {
+          // v4 had no system prompts; seed the preset catalog (current_date on).
+          const existing = (state as { systemPrompts?: Record<string, SystemPrompt> })
+            .systemPrompts;
+          (state as { systemPrompts: Record<string, SystemPrompt> }).systemPrompts =
+            seedSystemPrompts(existing ?? {});
+        }
         return state as MimirState;
       },
       partialize: (s) => ({
@@ -733,6 +858,7 @@ export const useMimir = create<MimirState>()(
         workspaces: s.workspaces,
         memories: s.memories,
         skills: s.skills,
+        systemPrompts: s.systemPrompts,
         settings: s.settings,
       }),
     }

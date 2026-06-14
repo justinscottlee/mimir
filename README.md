@@ -70,13 +70,13 @@ from `/v1/chat/completions`.
 ## Layout
 
 - Left sidebar: New conversation, New workspace, Search (⌘K), Conversations,
-  Workspaces, Memories, Skills, Tools, and a profile footer with settings.
+  Workspaces, Memories, Skills, Tools, System Prompt, and a profile footer with settings.
 - Main area: tab bar on top. Tabs are reserved for chats and workspaces —
   drag to reorder, click the title of the active tab to rename it (renames
   the underlying conversation/workspace too). A "+" button at the right end of
   the strip opens a small menu to start a New conversation or New workspace,
   each of which opens as a new tab.
-- Manager pages (Conversations, Workspaces, Memories, Skills, Tools,
+- Manager pages (Conversations, Workspaces, Memories, Skills, Tools, System Prompt,
   Settings) open as draggable floating windows: title top-left, close button
   top-right, one window per kind. Positions persist across refreshes. Each
   window is resizable from the bottom-right corner, with a per-kind default,
@@ -229,6 +229,30 @@ Manage them in the Skills window: paste a SKILL.md to import (frontmatter or
 heading/paragraph fallback is parsed live, script references are detected),
 edit name/description/body, toggle on/off, delete. `lib/skills.ts` holds the
 parser, discovery prompt, and tool.
+
+## System prompts
+
+The text sent ahead of every conversation is assembled in `lib/systemPrompts.ts`
+from three sources, in order: enabled **system prompts** (presets first, then
+custom), the **memory** prompt, and the **skills** discovery menu.
+`buildSystemSegments` returns labeled segments, so the chat and the manager
+share one source of truth — what you preview is exactly what's sent.
+
+- **Presets.** A small catalog of toggleable prompts. They can be *dynamic*:
+  the **Current date & knowledge cutoff** preset regenerates each send with
+  today's real date and reminds the model its training cutoff is in the past —
+  which stops it from assuming its training-time "now" is the present. It ships
+  enabled; the rest (concise, Markdown, direct & honest, cite sources) are
+  opt-in. Presets can be enabled/disabled but not edited or deleted.
+- **Custom prompts.** Create your own standing instructions (name, description,
+  body), toggle them on/off, edit, and delete — the same flow as Skills.
+- **Full prompt view.** "View full system prompt" shows every active segment
+  with its source label — including the text generated from memories and skills
+  — plus the list of tools advertised as function schemas, with a copy button.
+  Full transparency about what reaches the model.
+
+Presets are seeded into the store and reconciled on migration, so a user's
+enable/disable choices and custom prompts survive upgrades.
 
 ## Stubs (intentionally unbuilt)
 
