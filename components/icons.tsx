@@ -193,3 +193,9 @@ export const IconDoc = (p: IconProps) => (
         <path d="M8.67 1.67V5.33H12.67M5.33 8.33H10.67M5.33 10.67H10.67" />
     </Svg>
 );
+export const IconPencil = (p: IconProps) => (
+    <Svg {...p}>
+        <path d="M11.33 2L14 4.67L5.33 13.33L2 14L2.67 10.67L11.33 2Z" />
+        <path d="M10 3.33L12.67 6" />
+    </Svg>
+);

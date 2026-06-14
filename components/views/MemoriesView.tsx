@@ -170,7 +170,7 @@ function MemoryRow({
                 : "Disabled — click to enable"
             }
             className={[
-              "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors",
+              "mt-0.5 relative flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors md:h-4 md:w-4 max-md:before:absolute max-md:before:-inset-1.5 max-md:before:rounded-md max-md:before:content-['']",
               memory.enabled
                 ? "border-bronze-500 bg-bronze-500 text-ink-950"
                 : "border-ink-700 text-transparent hover:border-parchment-600",

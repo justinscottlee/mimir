@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { useMimir } from "@/lib/store";
 import {
   IconBox,
@@ -15,6 +16,9 @@ import {
   IconUser,
 } from "./icons";
 import Image from "next/image"
+
+
+
 
 export default function Sidebar({
   mobileOpen = false,
@@ -37,6 +41,39 @@ export default function Sidebar({
     fn();
     onClose?.();
   };
+
+  // Swipe-left-to-close for the mobile drawer. We track the touch start and,
+  // on release, close if the gesture was a clear leftward swipe.
+  const touch = useRef<{ x: number; y: number } | null>(null);
+  useEffect(() => {
+    const handleTouchStart = (e: TouchEvent) => {
+      const t = e.touches[0];
+      touch.current = { x: t.clientX, y: t.clientY };
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (!touch.current || !mobileOpen) return;
+
+      const t = e.changedTouches[0];
+      const dx = t.clientX - touch.current.x;
+      const dy = t.clientY - touch.current.y;
+      touch.current = null;
+
+      // Close on a clear leftward swipe (ignores vertical scrolling)
+      if (dx < -55 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+        onClose?.();
+      }
+    };
+
+    // passive: true prevents blocking native scroll behavior on mobile
+    document.addEventListener('touchstart', handleTouchStart, { passive: true });
+    document.addEventListener('touchend', handleTouchEnd, { passive: true });
+
+    return () => {
+      document.removeEventListener('touchstart', handleTouchStart);
+      document.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [mobileOpen, onClose]);
 
   return (
     <aside
@@ -183,7 +220,7 @@ function SidebarButton({
     <button
       onClick={onClick}
       className={[
-        "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors",
+        "flex items-center gap-2.5 rounded-md px-2.5 py-2.5 text-left text-sm transition-colors md:py-1.5",
         active
           ? "bg-ink-800 text-parchment-100"
           : "text-parchment-400 hover:bg-ink-800 hover:text-parchment-100",
@@ -195,7 +232,9 @@ function SidebarButton({
       </span>
       <span className="flex-1">{label}</span>
       {hint && (
-        <kbd className="font-mono text-[10px] text-parchment-600">{hint}</kbd>
+        <kbd className="font-mono text-[10px] text-parchment-600 max-md:hidden">
+          {hint}
+        </kbd>
       )}
     </button>
   );

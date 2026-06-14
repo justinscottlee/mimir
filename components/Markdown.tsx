@@ -120,13 +120,13 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
   return (
     <div className="my-3 overflow-hidden rounded-lg border border-ink-700 bg-ink-950">
       <div className="flex items-center gap-2 border-b border-ink-700 bg-ink-850 px-3 py-1.5">
-        <span className="font-mono text-[11px] text-parchment-600">
+        <span className="font-mono text-xs text-parchment-600">
           {language}
         </span>
         <div className="flex-1" />
         <button
           onClick={copy}
-          className="flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[11px] text-parchment-600 transition-colors hover:bg-ink-700 hover:text-parchment-100"
+          className="flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-xs text-parchment-600 transition-colors hover:bg-ink-700 hover:text-parchment-100"
           title="Copy code"
         >
           {copied ? (

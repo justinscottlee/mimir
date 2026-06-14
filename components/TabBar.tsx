@@ -3,23 +3,43 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMimir } from "@/lib/store";
-import { IconBox, IconChat, IconClose, IconMenu, IconPlus } from "./icons";
+import {IconBox, IconChat, IconClose, IconMenu, IconPlus, IconPencil, IconTrash, IconCheck} from "./icons";
 
 export default function TabBar({ onOpenNav }: { onOpenNav?: () => void }) {
   const tabs = useMimir((s) => s.tabs);
   const activeTabId = useMimir((s) => s.activeTabId);
   const setActiveTab = useMimir((s) => s.setActiveTab);
   const closeTab = useMimir((s) => s.closeTab);
+  const closeOtherTabs = useMimir((s) => s.closeOtherTabs);
+  const closeTabsToRight = useMimir((s) => s.closeTabsToRight);
   const moveTabBefore = useMimir((s) => s.moveTabBefore);
   const renameTabRef = useMimir((s) => s.renameTabRef);
+  const deleteConversation = useMimir((s) => s.deleteConversation);
+  const deleteWorkspace = useMimir((s) => s.deleteWorkspace);
 
   const [dragId, setDragId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [menu, setMenu] = useState<{ tabId: string; x: number; y: number } | null>(
+    null
+  );
 
   function commitRename(tabId: string) {
     renameTabRef(tabId, draft);
     setEditingId(null);
+  }
+
+  function startRename(tabId: string) {
+    const tab = tabs.find((t) => t.id === tabId);
+    if (!tab) return;
+    setActiveTab(tabId);
+    setDraft(tab.title);
+    setEditingId(tabId);
+  }
+
+  function openMenu(e: React.MouseEvent, tabId: string) {
+    e.preventDefault();
+    setMenu({ tabId, x: e.clientX, y: e.clientY });
   }
 
   return (
@@ -53,6 +73,7 @@ export default function TabBar({ onOpenNav }: { onOpenNav?: () => void }) {
             onDragEnd={() => setDragId(null)}
             onClick={() => setActiveTab(tab.id)}
             onKeyDown={(e) => e.key === "Enter" && setActiveTab(tab.id)}
+            onContextMenu={(e) => openMenu(e, tab.id)}
             className={[
               "group flex max-w-[220px] cursor-pointer items-center gap-2 rounded-t-md border-x border-t px-3 py-1.5 text-sm",
               dragId === tab.id ? "opacity-50" : "",
@@ -101,7 +122,7 @@ export default function TabBar({ onOpenNav }: { onOpenNav?: () => void }) {
                 e.stopPropagation();
                 closeTab(tab.id);
               }}
-              className="rounded p-0.5 text-parchment-600 transition-opacity hover:bg-ink-700 hover:text-parchment-100 focus-visible:opacity-100 max-md:opacity-100 md:opacity-0 md:group-hover:opacity-100"
+              className="rounded p-1.5 text-parchment-600 transition-opacity hover:bg-ink-700 hover:text-parchment-100 focus-visible:opacity-100 max-md:opacity-100 md:p-0.5 md:opacity-0 md:group-hover:opacity-100"
               aria-label={`Close ${tab.title}`}
             >
               <IconClose className="h-4 w-4" />
@@ -111,7 +132,166 @@ export default function TabBar({ onOpenNav }: { onOpenNav?: () => void }) {
       })}
 
       <NewTabButton />
+
+      {menu && (
+        <TabContextMenu
+          x={menu.x}
+          y={menu.y}
+          tab={tabs.find((t) => t.id === menu.tabId) ?? null}
+          tabCount={tabs.length}
+          isLast={tabs[tabs.length - 1]?.id === menu.tabId}
+          onClose={() => setMenu(null)}
+          onRename={() => startRename(menu.tabId)}
+          onCloseTab={() => closeTab(menu.tabId)}
+          onCloseOthers={() => closeOtherTabs(menu.tabId)}
+          onCloseRight={() => closeTabsToRight(menu.tabId)}
+          onDelete={() => {
+            const tab = tabs.find((t) => t.id === menu.tabId);
+            if (!tab) return;
+            if (tab.kind === "chat") deleteConversation(tab.refId);
+            else deleteWorkspace(tab.refId);
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+/** Right-click menu for a tab. Rendered in a portal and clamped on-screen. */
+function TabContextMenu({
+                          x,
+                          y,
+                          tab,
+                          tabCount,
+                          isLast,
+                          onClose,
+                          onRename,
+                          onCloseTab,
+                          onCloseOthers,
+                          onCloseRight,
+                          onDelete,
+                        }: {
+  x: number;
+  y: number;
+  tab: { kind: "chat" | "workspace" } | null;
+  tabCount: number;
+  isLast: boolean;
+  onClose: () => void;
+  onRename: () => void;
+  onCloseTab: () => void;
+  onCloseOthers: () => void;
+  onCloseRight: () => void;
+  onDelete: () => void;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // Clamp so the menu never spills off the right or bottom edges.
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    const w = el?.offsetWidth ?? 200;
+    const h = el?.offsetHeight ?? 240;
+    const margin = 8;
+    const left = Math.max(margin, Math.min(x, window.innerWidth - w - margin));
+    const top = Math.max(margin, Math.min(y, window.innerHeight - h - margin));
+    setPos({ left, top });
+  }, [x, y]);
+
+  useEffect(() => {
+    function onDocPointer(e: PointerEvent) {
+      if (menuRef.current?.contains(e.target as Node)) return;
+      onClose();
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("pointerdown", onDocPointer);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("resize", onClose);
+    window.addEventListener("scroll", onClose, true);
+    return () => {
+      document.removeEventListener("pointerdown", onDocPointer);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", onClose);
+      window.removeEventListener("scroll", onClose, true);
+    };
+  }, [onClose]);
+
+  if (typeof document === "undefined") return null;
+
+  const run = (fn: () => void) => () => {
+    fn();
+    onClose();
+  };
+
+  return createPortal(
+      <div
+          ref={menuRef}
+          role="menu"
+          style={{
+            position: "fixed",
+            left: pos?.left ?? x,
+            top: pos?.top ?? y,
+            visibility: pos ? "visible" : "hidden",
+          }}
+          className="z-[100] w-52 overflow-hidden rounded-lg border border-ink-700 bg-ink-900 py-1 shadow-[0_12px_32px_rgba(0,0,0,0.5)]"
+      >
+        <MenuItem
+            icon={<IconPencil className="h-4 w-4" />}
+            label="Rename"
+            onClick={run(onRename)}
+        />
+        <div className="my-1 h-px bg-ink-700" />
+        <MenuItem
+            icon={<IconClose className="h-4 w-4" />}
+            label="Close tab"
+            onClick={run(onCloseTab)}
+        />
+        <MenuItem
+            icon={<IconClose className="h-4 w-4" />}
+            label="Close other tabs"
+            disabled={tabCount <= 1}
+            onClick={run(onCloseOthers)}
+        />
+        <MenuItem
+            icon={<IconClose className="h-4 w-4" />}
+            label="Close tabs to the right"
+            disabled={isLast}
+            onClick={run(onCloseRight)}
+        />
+        <div className="my-1 h-px bg-ink-700" />
+
+        {confirmDelete ? (
+            <div className="flex pl-4 items-center gap-3 py-2">
+              <span className="text-xs font-medium text-signal-err">Delete permanently?</span>
+              <button
+                  onClick={() => { onDelete(); onClose(); }}
+                  className="rounded p-0.5 text-signal-err hover:bg-signal-err/20"
+                  title="Confirm delete"
+                  aria-label="Confirm delete"
+              >
+                <IconCheck className="h-4 w-4" />
+              </button>
+              <button
+                  onClick={() => setConfirmDelete(false)}
+                  className="rounded p-0.5 text-parchment-400 hover:bg-ink-700 hover:text-parchment-100"
+                  title="Cancel"
+                  aria-label="Cancel delete"
+              >
+              <IconClose className="h-4 w-4" />
+            </button>
+          </div>
+        ) : (
+            <MenuItem
+                icon={<IconTrash className="h-4 w-4" />}
+                label={tab?.kind === "workspace" ? "Delete workspace" : "Delete conversation"}
+                destructive
+                onClick={() => setConfirmDelete(true)}
+            />
+        )}
+      </div>,
+      document.body
   );
 }
 
@@ -131,7 +311,15 @@ function NewTabButton() {
   const reposition = useCallback(() => {
     if (!btnRef.current) return;
     const r = btnRef.current.getBoundingClientRect();
-    setCoords({ left: r.left, top: r.bottom + 4 });
+    // Menu is w-52 (208px). Keep it on-screen: if the button is near the right
+    // edge, shift the menu left so its right edge sits just inside the viewport.
+    const MENU_W = 208;
+    const margin = 8;
+    const left = Math.max(
+      margin,
+      Math.min(r.left, window.innerWidth - MENU_W - margin)
+    );
+    setCoords({ left, top: r.bottom + 4 });
   }, []);
 
   useLayoutEffect(() => {
@@ -224,18 +412,40 @@ function MenuItem({
   icon,
   label,
   onClick,
+  disabled,
+  destructive,
 }: {
   icon: React.ReactNode;
   label: string;
   onClick: () => void;
+  disabled?: boolean;
+  destructive?: boolean;
 }) {
   return (
     <button
       role="menuitem"
       onClick={onClick}
-      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-parchment-400 transition-colors hover:bg-ink-800 hover:text-parchment-100"
+      disabled={disabled}
+      className={[
+        "flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm transition-colors md:py-2",
+        disabled
+          ? "cursor-not-allowed text-parchment-600/40"
+          : destructive
+          ? "text-signal-err hover:bg-signal-err/10"
+          : "text-parchment-400 hover:bg-ink-800 hover:text-parchment-100",
+      ].join(" ")}
     >
-      <span className="text-parchment-600">{icon}</span>
+      <span
+        className={
+          disabled
+            ? "text-parchment-600/40"
+            : destructive
+            ? "text-signal-err"
+            : "text-parchment-600"
+        }
+      >
+        {icon}
+      </span>
       {label}
     </button>
   );

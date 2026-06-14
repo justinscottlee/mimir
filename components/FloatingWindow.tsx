@@ -71,6 +71,20 @@ function FloatingWindow({ win, isMobile }: { win: Win; isMobile: boolean }) {
     if (!resizeRef.current) setSize({ w: win.w, h: win.h });
   }, [win.w, win.h]);
 
+  // Keep the window within the viewport: clamp on mount and when the viewport
+  // resizes, committing any correction back to the store. Skipped on mobile,
+  // where windows are full-screen sheets.
+  useEffect(() => {
+    if (isMobile) return;
+    function apply() {
+      const c = clampToBounds(win.x, win.y, win.w, win.h);
+      if (c.x !== win.x || c.y !== win.y) moveWindow(win.id, c.x, c.y);
+    }
+    apply();
+    window.addEventListener("resize", apply);
+    return () => window.removeEventListener("resize", apply);
+  }, [isMobile, win.x, win.y, win.w, win.h, win.id, moveWindow]);
+
   function startDrag(e: React.PointerEvent) {
     if ((e.target as HTMLElement).closest("button")) return;
     e.preventDefault();
@@ -78,13 +92,13 @@ function FloatingWindow({ win, isMobile }: { win: Win; isMobile: boolean }) {
 
     function onMove(ev: PointerEvent) {
       if (!dragRef.current) return;
-      const x = clamp(
+      const next = clampToBounds(
         ev.clientX - dragRef.current.offsetX,
-        -size.w + 120,
-        window.innerWidth - 120
+        ev.clientY - dragRef.current.offsetY,
+        size.w,
+        size.h
       );
-      const y = clamp(ev.clientY - dragRef.current.offsetY, 0, window.innerHeight - 48);
-      setPos({ x, y });
+      setPos(next);
     }
     function onUp() {
       if (dragRef.current) {
@@ -232,4 +246,26 @@ function WindowContent({ kind }: { kind: WindowKind }) {
 
 function clamp(v: number, min: number, max: number): number {
   return Math.min(Math.max(v, min), max);
+}
+
+/** Width of the desktop sidebar (w-56). Windows can't move left of it. */
+const SIDEBAR_W = 224;
+
+/**
+ * Clamps a window's top-left so the whole window stays on screen: left bound is
+ * the sidebar, right/bottom bounds keep the far edges flush with the viewport,
+ * top bound is 0. Falls back to the input when there's no window object (SSR).
+ */
+function clampToBounds(
+  x: number,
+  y: number,
+  w: number,
+  h: number
+): { x: number; y: number } {
+  if (typeof window === "undefined") return { x, y };
+  const left = SIDEBAR_W;
+  const right = Math.max(left, window.innerWidth - w);
+  const top = 0;
+  const bottom = Math.max(top, window.innerHeight - h);
+  return { x: clamp(x, left, right), y: clamp(y, top, bottom) };
 }

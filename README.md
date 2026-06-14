@@ -73,14 +73,19 @@ from `/v1/chat/completions`.
   Workspaces, Memories, Skills, Tools, System Prompt, and a profile footer with settings.
 - Main area: tab bar on top. Tabs are reserved for chats and workspaces —
   drag to reorder, click the title of the active tab to rename it (renames
-  the underlying conversation/workspace too). A "+" button at the right end of
-  the strip opens a small menu to start a New conversation or New workspace,
-  each of which opens as a new tab.
+  the underlying conversation/workspace too), and right-click a tab for a
+  context menu (rename, close, close others, close to the right, delete the
+  conversation/workspace). A "+" button at the right end of the strip opens a
+  small menu to start a New conversation or New workspace, each of which opens
+  as a new tab.
 - Manager pages (Conversations, Workspaces, Memories, Skills, Tools, System Prompt,
   Settings) open as draggable floating windows: title top-left, close button
-  top-right, one window per kind. Positions persist across refreshes. Each
-  window is resizable from the bottom-right corner, with a per-kind default,
-  minimum, and maximum size; the chosen size persists too.
+  top-right, one window per kind. They're clamped to the viewport — the sidebar
+  is the left bound, the screen edges the others — so a window can't be dragged
+  off-screen, and they're pulled back in if the viewport shrinks. Positions
+  persist across refreshes. Each window is resizable from the bottom-right
+  corner, with a per-kind default, minimum, and maximum size; the chosen size
+  persists too.
 - The Conversations window has a search bar (matching titles and message
   content, same as the global ⌘K search) and a Select mode for multi-select —
   tick several conversations and delete them all behind a single confirmation.
@@ -91,12 +96,15 @@ The interface adapts below the `md` breakpoint (768px):
 
 - The left sidebar collapses into an off-canvas drawer, opened by a hamburger
   button at the left of the tab bar and dismissed by tapping the backdrop, the
-  close button, or any action inside it.
+  close button, any action inside it, or by swiping it left.
 - Manager pages (Conversations, Settings, …) open as full-screen sheets
   instead of draggable/resizable windows — only the focused one shows, and it's
   closed with the header's ✕. Dragging and resizing are desktop-only.
 - Settings switches from a two-column layout to a stacked one with a horizontal
   section selector.
+- Touch targets grow below `md`: checkboxes and slider switches are larger and
+  get a slightly oversized invisible hit area, sidebar/menu rows are taller, and
+  keyboard-shortcut hints (e.g. ⌘K) are hidden since they don't apply.
 - The chat header, message column, and composer use tighter gutters; tab close
   buttons are always visible (no hover on touch); inputs render at 16px to
   avoid iOS focus-zoom; and the app uses the dynamic viewport height (`dvh`)
@@ -165,7 +173,9 @@ calls, it runs each handler, appends the assistant tool-call message and a
 `tool`-role result message (with proper `tool_call_id` linkage), and loops —
 until the model replies with prose and no calls, or a round cap (default 5)
 is hit. `onText` streams the current round's tokens; `onToolEvent` fires
-after each tool runs.
+after each tool runs. The per-message stats (duration, output tokens, tok/s)
+are aggregated across every round, so a response that makes several tool calls
+reports its total generation time rather than just the final request's.
 
 Tools live in a registry: `{ name -> { def, run } }`. `def` is the schema
 advertised to the model; `run(args)` executes and returns a string fed back

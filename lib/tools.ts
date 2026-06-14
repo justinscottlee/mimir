@@ -96,7 +96,16 @@ export async function runToolLoop(
   const working: ChatMessage[] = [...messages];
   const toolEvents: ToolEvent[] = [];
 
-  let lastMeta: Omit<ChatResult, "toolCalls" | "content"> = {};
+  // Accumulate stats across every round so the reported duration and token
+  // counts cover the whole response, not just the final request. A response
+  // with tool calls makes several HTTP requests; previously only the last
+  // one's timing was kept, undercounting the real generation time.
+  let totalDurationMs = 0; // wall-clock across all requests (shown as the time)
+  let totalCompletionTokens = 0;
+  let totalGenMs = 0; // pure generation time, for an accurate tok/s
+  let lastPromptTokens: number | undefined;
+  let lastTps: number | undefined;
+  let rounds = 0;
   let committed = "";
 
   for (let round = 0; round < maxRounds; round++) {
@@ -114,7 +123,19 @@ export async function runToolLoop(
     );
 
     const { toolCalls, content, ...meta } = result;
-    lastMeta = meta;
+    rounds++;
+    totalDurationMs += meta.durationMs ?? 0;
+    totalCompletionTokens += meta.completionTokens ?? 0;
+    lastTps = meta.tokensPerSecond;
+    // Estimate this round's pure generation time from its reported throughput,
+    // falling back to wall-clock. Used to derive an aggregate tok/s.
+    totalGenMs +=
+      meta.tokensPerSecond && meta.completionTokens
+        ? (meta.completionTokens / meta.tokensPerSecond) * 1000
+        : meta.durationMs ?? 0;
+    // The final round's prompt is the largest (it includes all prior tool
+    // results), so it best reflects the context the model actually saw.
+    if (meta.promptTokens != null) lastPromptTokens = meta.promptTokens;
 
     // No tool calls → done. Append this round's text and finish.
     if (toolCalls.length === 0) {
@@ -178,5 +199,19 @@ export async function runToolLoop(
     }
   }
 
-  return { content: committed, meta: lastMeta, toolEvents };
+  const aggregatedMeta: Omit<ChatResult, "toolCalls" | "content"> = {
+    promptTokens: lastPromptTokens,
+    completionTokens: totalCompletionTokens || undefined,
+    durationMs: totalDurationMs || undefined,
+    // Single round: keep the server-reported throughput (most accurate).
+    // Multiple rounds: derive overall throughput from total generation time.
+    tokensPerSecond:
+      rounds <= 1
+        ? lastTps
+        : totalGenMs > 0
+        ? totalCompletionTokens / (totalGenMs / 1000)
+        : undefined,
+  };
+
+  return { content: committed, meta: aggregatedMeta, toolEvents };
 }

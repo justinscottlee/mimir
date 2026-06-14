@@ -170,7 +170,7 @@ export default function ConversationsView() {
                   {selectMode && (
                     <span
                       className={[
-                        "flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors",
+                        "flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors md:h-4 md:w-4",
                         isSel
                           ? "border-bronze-500 bg-bronze-500 text-ink-950"
                           : "border-ink-700",

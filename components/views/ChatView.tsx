@@ -39,6 +39,8 @@ export default function ChatView({ conversationId }: { conversationId: string })
   const [streamError, setStreamError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState("");
 
   const streamingRef = useRef(false);
   useEffect(() => {
@@ -292,6 +294,22 @@ export default function ChatView({ conversationId }: { conversationId: string })
     [conversationId, truncateAfterMessage, runCompletion]
   );
 
+  const editMessage = useCallback(
+    async (messageId: string, newContent: string) => {
+      if (streamingRef.current || !newContent.trim()) return;
+
+      // Remove everything after the target message
+      truncateAfterMessage(conversationId, messageId);
+      // Replace the target message content
+      patchMessage(conversationId, messageId, { content: newContent.trim() });
+
+      const current = useMimir.getState().conversations[conversationId];
+      if (!current) return;
+      await runCompletion(current.messages);
+    },
+    [conversationId, truncateAfterMessage, patchMessage, runCompletion]
+  );
+
   const stop = useCallback(() => {
     abortRef.current?.abort();
   }, []);
@@ -364,6 +382,17 @@ export default function ChatView({ conversationId }: { conversationId: string })
                 isStreaming={streaming && i === conversation.messages.length - 1}
                 onDelete={handleDeleteMessage}
                 onResend={m.role === "user" ? resend : undefined}
+                // Edit props
+                canEdit={m.role === "user"}
+                isEditing={editingMsgId === m.id}
+                editDraft={editDraft}
+                onStartEdit={(id, content) => { setEditingMsgId(id); setEditDraft(content); }}
+                onDraftChange={setEditDraft}
+                onSubmitEdit={() => {
+                  if (editingMsgId) editMessage(editingMsgId, editDraft);
+                  setEditingMsgId(null);
+                }}
+                onCancelEdit={() => setEditingMsgId(null)}
               />
             ))}
             {streamError && (
@@ -458,15 +487,29 @@ function ModelSelect({
 
 const MessageRow = memo(
   function MessageRow({
-    message,
-    isStreaming,
-    onDelete,
-    onResend,
-  }: {
+                        message,
+                        isStreaming,
+                        onDelete,
+                        onResend,
+                        canEdit,
+                        isEditing,
+                        editDraft,
+                        onStartEdit,
+                        onDraftChange,
+                        onSubmitEdit,
+                        onCancelEdit,
+                      }: {
     message: Message;
     isStreaming: boolean;
     onDelete: (id: string) => void;
     onResend?: (id: string) => void;
+    canEdit?: boolean;
+    isEditing?: boolean;
+    editDraft?: string;
+    onStartEdit?: (id: string, content: string) => void;
+    onDraftChange?: (val: string) => void;
+    onSubmitEdit?: () => void;
+    onCancelEdit?: () => void;
   }) {
     const isUser = message.role === "user";
     const [copied, setCopied] = useState(false);
@@ -479,22 +522,50 @@ const MessageRow = memo(
     }
 
     return (
-      <div
-        className={[
-          "group flex flex-col gap-1",
-          isUser ? "items-end" : "items-start",
-        ].join(" ")}
-      >
+      <div className={["group flex flex-col gap-1", isUser ? "items-end" : "items-start"].join(" ")}>
         <div
           className={[
-            "max-w-[92%] min-w-0 md:max-w-[88%] rounded-lg px-4 py-2.5",
+            "max-w-[92%] min-w-0 md:max-w-[88%] h-full rounded-lg px-4 py-2.5",
             isUser
               ? "whitespace-pre-wrap bg-bronze-600/20 text-sm leading-relaxed text-parchment-100"
-              : "w-full border border-ink-700 bg-ink-900 text-parchment-100",
+              : "w-full border border-ink-700 bg-ink-900 text-parchment-100", isEditing ? "w-[40rem]" : ""
           ].join(" ")}
         >
           {isUser ? (
-            message.content
+            isEditing && onDraftChange ? (
+              <div className="flex w-full flex-col gap-2">
+                <textarea
+                  autoFocus
+                  value={editDraft}
+                  onChange={(e) => onDraftChange(e.target.value)}
+                  rows={3}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      onSubmitEdit?.();
+                    }
+                  }}
+                  className="w-full resize-none max-h-72 [field-sizing:content] rounded-lg border border-bronze-600/50 bg-ink-850 px-4 py-2 text-sm leading-relaxed text-parchment-100 focus:border-bronze-500 focus:outline-none"
+                />
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    onClick={onCancelEdit}
+                    className="rounded px-3 py-1.5 text-sm font-medium text-parchment-600  hover:text-parchment-100"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={onSubmitEdit}
+                    disabled={!editDraft?.trim() || isStreaming}
+                    className="flex items-center gap-1.5 rounded-md bg-bronze-500 px-3 py-1.5 text-sm font-medium text-ink-950 hover:bg-bronze-400 transition-colors disabled:opacity-30"
+                  >
+                    <Icons.IconSend className="h-4 w-4" /> Resend
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <span>{message.content}</span>
+            )
           ) : message.content ? (
             <>
               <AssistantBody
@@ -509,24 +580,17 @@ const MessageRow = memo(
             <InterruptedTag standalone />
           ) : (
             <span className="text-sm text-parchment-600">
-              {isStreaming ? "▍" : "(empty response)"}
+              {isStreaming ? "..." : "(empty response)"}
             </span>
           )}
         </div>
 
-        <div
-          className={[
-            "flex items-center gap-1.5 px-1 font-mono text-[11px] text-parchment-600",
-            isUser ? "flex-row-reverse" : "",
-          ].join(" ")}
-        >
-          {!isUser && <MetaLine meta={message.meta} modelKey={message.model} />}
-          <div
-            className={[
-              "flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100",
-              isUser ? "flex-row-reverse" : "",
-            ].join(" ")}
-          >
+        {/* Action Toolbar */}
+        <div className={["flex items-center gap-1.5 px-1 text-xs text-parchment-600", isUser ? "flex-row-reverse" : ""].join(" ")}>
+          {!isUser && !isEditing && <MetaLine meta={message.meta} modelKey={message.model} />}
+          <div className={["flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100", isUser ? "flex-row-reverse" : ""].join(" ")}>
+            {isEditing && !canEdit && null} {/* No-op for layout */}
+
             <ActionButton label={copied ? "Copied" : "Copy message"} onClick={copy}>
               {copied ? (
                 <Icons.IconCheck className="h-4 w-4 text-signal-ok" />
@@ -534,7 +598,19 @@ const MessageRow = memo(
                 <Icons.IconCopy className="h-4 w-4" />
               )}
             </ActionButton>
-            {onResend && (
+
+            {/* Edit Trigger Button */}
+            {canEdit && !isEditing && (
+              <ActionButton
+                label="Edit message"
+                onClick={() => onStartEdit?.(message.id, message.content)}
+                disabled={isStreaming}
+              >
+                <Icons.IconPencil className="h-4 w-4" />
+              </ActionButton>
+            )}
+
+            {onResend && !isEditing && (
               <ActionButton
                 label="Resend (regenerates everything after this message)"
                 onClick={() => onResend(message.id)}
@@ -543,11 +619,14 @@ const MessageRow = memo(
                 <Icons.IconRefresh className="h-4 w-4" />
               </ActionButton>
             )}
-            <ConfirmDelete
-              label="Delete message"
-              message="Delete?"
-              onConfirm={() => onDelete(message.id)}
-            />
+
+            {!isEditing && (
+              <ConfirmDelete
+                label="Delete message"
+                message="Delete?"
+                onConfirm={() => onDelete(message.id)}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -557,7 +636,10 @@ const MessageRow = memo(
     prev.message === next.message &&
     prev.isStreaming === next.isStreaming &&
     prev.onResend === next.onResend &&
-    prev.onDelete === next.onDelete
+    prev.onDelete === next.onDelete &&
+    prev.canEdit === next.canEdit &&
+    prev.isEditing === next.isEditing &&
+    prev.editDraft === next.editDraft
 );
 
 function InterruptedTag({ standalone = false }: { standalone?: boolean }) {
@@ -920,14 +1002,14 @@ function ToolChip({ event }: { event?: ToolEventRecord }) {
         />
       </button>
       {open && (
-        <div className="border-t border-ink-700 px-2.5 py-1.5">
-          <div className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-parchment-400">
+        <div className="border-t border-ink-700 px-2.5 py-3">
+          <div className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-parchment-400">
             {event.result}
           </div>
           {savedContent && (
-            <div className="mt-2 flex items-center gap-2 border-t border-ink-700 pt-2">
+            <div className="flex mt-2 text-xs items-center gap-2 border-t border-ink-700 pt-3">
               {deleted ? (
-                <span className="text-[11px] italic text-parchment-600">
+                <span className="text-parchment-600">
                   Memory deleted.
                 </span>
               ) : matchingMemory ? (
@@ -939,7 +1021,7 @@ function ToolChip({ event }: { event?: ToolEventRecord }) {
                   }}
                 />
               ) : (
-                <span className="text-[11px] italic text-parchment-600">
+                <span className="text-parchment-600">
                   Memory no longer stored.
                 </span>
               )}
@@ -961,7 +1043,7 @@ function ConfirmDeleteInline({
   const [armed, setArmed] = useState(false);
   if (armed) {
     return (
-      <span className="flex items-center gap-1.5 text-[11px] text-signal-err">
+      <span className="flex items-center gap-1.5 text-xs text-signal-err">
         {message}
         <button
           onClick={onConfirm}
@@ -982,7 +1064,7 @@ function ConfirmDeleteInline({
   return (
     <button
       onClick={() => setArmed(true)}
-      className="flex items-center gap-1 rounded text-[11px] text-parchment-400 hover:text-signal-err"
+      className="flex items-center gap-1 rounded text-xs text-parchment-400 hover:text-signal-err"
     >
       <Icons.IconTrash className="h-4 w-4" />
       Delete memory

@@ -56,7 +56,7 @@ export default function ConfirmDelete({
           className,
         ].join(" ")}
       >
-        <span className="text-[11px] text-signal-err">{message}</span>
+        <span className="text-xs text-signal-err">{message}</span>
         <button
           onClick={(e) => wrap(e, onConfirm)}
           className="rounded p-0.5 text-signal-err hover:bg-signal-err/20"

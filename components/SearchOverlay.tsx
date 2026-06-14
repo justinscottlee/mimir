@@ -113,7 +113,7 @@ export default function SearchOverlay() {
             placeholder="Search conversations and workspaces…"
             className="flex-1 bg-transparent text-base md:text-sm text-parchment-100 placeholder:text-parchment-600 focus:outline-none"
           />
-          <kbd className="font-mono text-[10px] text-parchment-600">esc</kbd>
+          <kbd className="font-mono text-[10px] text-parchment-600 max-md:hidden">esc</kbd>
         </div>
 
         {query.trim() && (

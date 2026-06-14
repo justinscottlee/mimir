@@ -120,6 +120,8 @@ interface MimirState {
   // Tabs
   openTab: (kind: TabKind, refId: string, title: string) => void;
   closeTab: (tabId: string) => void;
+  closeOtherTabs: (tabId: string) => void;
+  closeTabsToRight: (tabId: string) => void;
   setActiveTab: (tabId: string) => void;
   moveTabBefore: (dragTabId: string, targetTabId: string) => void;
   renameTabRef: (tabId: string, title: string) => void;
@@ -254,6 +256,23 @@ export const useMimir = create<MimirState>()(
         set({ tabs: next, activeTabId: nextActive });
       },
 
+      closeOtherTabs: (tabId) => {
+        const { tabs } = get();
+        if (!tabs.some((t) => t.id === tabId)) return;
+        set({ tabs: tabs.filter((t) => t.id === tabId), activeTabId: tabId });
+      },
+
+      closeTabsToRight: (tabId) => {
+        const { tabs, activeTabId } = get();
+        const idx = tabs.findIndex((t) => t.id === tabId);
+        if (idx === -1) return;
+        const next = tabs.slice(0, idx + 1);
+        const nextActive = next.some((t) => t.id === activeTabId)
+          ? activeTabId
+          : tabId;
+        set({ tabs: next, activeTabId: nextActive });
+      },
+
       setActiveTab: (tabId) => set({ activeTabId: tabId }),
 
       moveTabBefore: (dragTabId, targetTabId) => {
@@ -296,8 +315,8 @@ export const useMimir = create<MimirState>()(
         const win: FloatingWindow = {
           id: uid("win_"),
           kind,
-          x: 90 + n * 32,
-          y: 64 + n * 28,
+          x: 248 + n * 30,
+          y: 72 + n * 28,
           w: spec.defaultW,
           h: spec.defaultH,
           z: zTop + 1,

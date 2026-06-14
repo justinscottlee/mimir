@@ -98,7 +98,7 @@ export default function ToolsView() {
 
       {/* Built-ins */}
       <div>
-        <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.2em] text-parchment-600">
+        <div className="mb-2 font-mono text-xs uppercase tracking-[0.2em] text-parchment-600">
           Built-in · local
         </div>
         <div className="flex flex-col gap-3">
@@ -167,7 +167,7 @@ function ToolCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium text-parchment-100">{title}</span>
-            <span className="font-mono text-[11px] text-parchment-600">{name}</span>
+            <span className="font-mono text-xs text-parchment-600">{name}</span>
           </div>
           <p
             className={[
@@ -206,7 +206,8 @@ function Switch({
       title={enabled ? "Enabled — click to disable" : "Disabled — click to enable"}
       onClick={() => onToggle(!enabled)}
       className={[
-        "relative mt-0.5 inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors",
+        "relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors md:h-5 md:w-9",
+        "max-md:before:absolute max-md:before:-inset-2 max-md:before:content-['']",
         enabled
           ? "border-bronze-500 bg-bronze-500/80"
           : "border-ink-700 bg-ink-800",
@@ -214,8 +215,10 @@ function Switch({
     >
       <span
         className={[
-          "inline-block h-3.5 w-3.5 transform rounded-full transition-transform",
-          enabled ? "translate-x-4 bg-ink-950" : "translate-x-0.5 bg-parchment-400",
+          "inline-block h-5 w-5 transform rounded-full transition-transform md:h-3.5 md:w-3.5",
+          enabled
+            ? "translate-x-[1.125rem] bg-ink-850"
+            : "translate-x-0.5 bg-parchment-400",
         ].join(" ")}
       />
     </button>
@@ -231,7 +234,7 @@ function Field({
 }) {
   return (
     <label className="flex flex-1 flex-col gap-1">
-      <span className="text-[11px] text-parchment-600">{label}</span>
+      <span className="text-xs text-parchment-600">{label}</span>
       {children}
     </label>
   );

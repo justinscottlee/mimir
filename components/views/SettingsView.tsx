@@ -169,7 +169,7 @@ function ModelsSection() {
                         onClick={() => setModelDisabled(key, enabled)}
                         title={enabled ? "Enabled — click to hide" : "Disabled — click to show"}
                         className={[
-                          "flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors",
+                          "relative flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors md:h-4 md:w-4 max-md:before:absolute max-md:before:-inset-1.5 max-md:before:rounded-md max-md:before:content-['']",
                           enabled
                             ? "border-bronze-500 bg-bronze-500"
                             : "border-ink-700 hover:border-parchment-600",
