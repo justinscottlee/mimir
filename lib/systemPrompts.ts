@@ -36,6 +36,9 @@ function formatToday(): string {
 /**
  * The built-in presets. Each is seeded into the store as a toggleable record;
  * the body is produced by `generate()` at use time so dynamic ones stay fresh.
+ * Enabled presets apply everywhere — chats and workspace agents alike. A few are
+ * worded for coding/agent work (e.g. "verify your work"); leave those off unless
+ * you want them in chats too.
  */
 export const SYSTEM_PROMPT_PRESETS: SystemPromptPreset[] = [
   {
@@ -85,6 +88,14 @@ export const SYSTEM_PROMPT_PRESETS: SystemPromptPreset[] = [
     generate: () =>
       "When you use web search or fetch a page, cite the sources you relied on with their title and URL so the user can verify them. Clearly separate what you found in those sources from what you inferred or already knew.",
   },
+  {
+    key: "explain_plan",
+    name: "Explain before big changes",
+    description:
+      "Asks the model to briefly state its approach before making substantial or destructive changes.",
+    generate: () =>
+      "Before a substantial or hard-to-reverse change, briefly state your approach in one or two sentences — what you're going to do and why — then carry it out. Keep this proportional: don't preface trivial steps, but don't make sweeping or destructive changes without a quick rationale first.",
+  },
 ];
 
 export function findPreset(key: string): SystemPromptPreset | undefined {
@@ -110,14 +121,20 @@ export interface SystemPromptSegment {
 }
 
 /**
- * Builds the ordered, labeled segments that make up the system prompt. Pass the
- * full collections from the store; only enabled items contribute. Used both to
- * assemble the string sent to the model and to render the preview.
+ * Builds the ordered, labeled segments that make up the system prompt for a
+ * Builds the ordered, labeled segments that make up the system prompt. All
+ * enabled prompts contribute — they apply everywhere (chats and workspace
+ * agents alike). Memories and skills are included when requested (chats); the
+ * workspace agent gets its own filesystem/plan context instead, so it passes
+ * `includeMemoriesAndSkills: false`. Used both to assemble the string sent to
+ * the model and to render the preview.
  */
 export function buildSystemSegments(args: {
   systemPrompts: SystemPrompt[];
   memories: Memory[];
   skills: Skill[];
+  /** Include the memory/skills background blocks (chats only). Defaults true. */
+  includeMemoriesAndSkills?: boolean;
 }): SystemPromptSegment[] {
   const segments: SystemPromptSegment[] = [];
 
@@ -144,16 +161,34 @@ export function buildSystemSegments(args: {
     if (text) segments.push({ label: p.name, origin: "custom", text });
   }
 
-  const memoryPrompt = buildMemoryPrompt(args.memories);
-  if (memoryPrompt) {
-    segments.push({ label: "Memories", origin: "memories", text: memoryPrompt });
-  }
-  const skillsPrompt = buildSkillsPrompt(args.skills);
-  if (skillsPrompt) {
-    segments.push({ label: "Skills", origin: "skills", text: skillsPrompt });
+  if (args.includeMemoriesAndSkills !== false) {
+    const memoryPrompt = buildMemoryPrompt(args.memories);
+    if (memoryPrompt) {
+      segments.push({ label: "Memories", origin: "memories", text: memoryPrompt });
+    }
+    const skillsPrompt = buildSkillsPrompt(args.skills);
+    if (skillsPrompt) {
+      segments.push({ label: "Skills", origin: "skills", text: skillsPrompt });
+    }
   }
 
   return segments;
+}
+
+/**
+ * The enabled system-prompt texts (presets then custom), in order. Folded into a
+ * workspace agent's system prompt so the same global guidance that applies to
+ * chats also applies to agents.
+ */
+export function workspaceScopedPromptTexts(
+  systemPrompts: SystemPrompt[]
+): string[] {
+  return buildSystemSegments({
+    systemPrompts,
+    memories: [],
+    skills: [],
+    includeMemoriesAndSkills: false,
+  }).map((s) => s.text);
 }
 
 /** Joins segments into the final system string sent to the model. */

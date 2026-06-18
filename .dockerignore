@@ -1,0 +1,17 @@
+# Keep the build context small and avoid copying a host-built node_modules
+# (which would be the wrong OS/arch) into the image.
+node_modules
+.next
+.git
+.cache
+.npm
+.npm-global
+.local
+.config
+*.log
+mmm.zip
+*.zip
+tsconfig.tsbuildinfo
+.env
+.env.local
+.DS_Store

@@ -17,6 +17,7 @@
   "dependencies": {
     "@types/react-syntax-highlighter": "^15.5.13",
     "better-auth": "^1.6.18",
+    "dockerode": "^4.0.12",
     "drizzle-orm": "^0.45.2",
     "iovalkey": "^0.3.3",
     "next": "^14.2.15",
@@ -26,13 +27,16 @@
     "react-markdown": "^10.1.0",
     "react-syntax-highlighter": "^16.1.1",
     "remark-gfm": "^4.0.1",
+    "tar-stream": "^3.2.0",
     "zustand": "^4.5.5"
   },
   "devDependencies": {
+    "@types/dockerode": "^3.3.47",
     "@types/node": "^20.16.11",
     "@types/pg": "^8.11.10",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.1",
+    "@types/tar-stream": "^3.1.4",
     "autoprefixer": "^10.4.20",
     "drizzle-kit": "^0.31.10",
     "postcss": "^8.4.47",

@@ -167,3 +167,14 @@ body {
 .mimir-spin {
   animation: mimir-spin 1.4s linear infinite;
 }
+
+/* Checkerboard backdrop so transparency is visible in the SVG preview. */
+.mimir-checker {
+  background-color: #2a3037;
+  background-image: linear-gradient(45deg, #1e2328 25%, transparent 25%),
+    linear-gradient(-45deg, #1e2328 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #1e2328 75%),
+    linear-gradient(-45deg, transparent 75%, #1e2328 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}

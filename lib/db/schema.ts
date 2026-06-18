@@ -156,10 +156,72 @@ export const workspaces = pgTable(
       .references(() => user.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     model: text("model"),
+    /** WorkspaceAgentConfig — max steps/tokens + standing instructions. */
+    agent: jsonb("agent"),
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
   },
   (t) => ({
     userIdx: index("workspaces_user_id_idx").on(t.userId),
+  })
+);
+
+/**
+ * One row per node in a workspace's virtual filesystem. The full set is
+ * replaced wholesale on each workspace upsert (same "replace the set" pattern
+ * as conversation messages), so a synthetic id and the (workspace, path)
+ * uniqueness are all that's needed.
+ */
+export const workspaceFiles = pgTable(
+  "workspace_files",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    /** "file" | "dir" */
+    type: text("type").notNull(),
+    content: text("content").notNull().default(""),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => ({
+    wsIdx: index("workspace_files_workspace_id_idx").on(t.workspaceId),
+    wsPathIdx: uniqueIndex("workspace_files_ws_path_idx").on(
+      t.workspaceId,
+      t.path
+    ),
+  })
+);
+
+/**
+ * One row per agent run. `steps` holds the run transcript (AgentStep[]) as
+ * jsonb so the flexible per-step shape (content, tool events, stats) tracks
+ * lib/types.ts directly. `seq` preserves run order within a workspace.
+ */
+export const workspaceRuns = pgTable(
+  "workspace_runs",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    seq: integer("seq").notNull(),
+    goal: text("goal").notNull(),
+    /** AgentRunStatus */
+    status: text("status").notNull(),
+    model: text("model"),
+    summary: text("summary"),
+    error: text("error"),
+    totalTokens: integer("total_tokens").notNull().default(0),
+    /** AgentStep[] */
+    steps: jsonb("steps").notNull().default([]),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { mode: "date" }),
+  },
+  (t) => ({
+    wsIdx: index("workspace_runs_workspace_id_idx").on(t.workspaceId),
+    wsSeqIdx: uniqueIndex("workspace_runs_ws_seq_idx").on(t.workspaceId, t.seq),
   })
 );
 
@@ -243,6 +305,8 @@ export const settings = pgTable("settings", {
   username: text("username").notNull().default("admin"),
   /** ToolSettings */
   tools: jsonb("tools").notNull(),
+  /** ContextManagementSettings (tool pruning + summarization). */
+  contextManagement: jsonb("context_management"),
   updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
 });
 

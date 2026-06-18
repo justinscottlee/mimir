@@ -10,15 +10,25 @@ import {
   describeModelKey,
 } from "@/lib/models";
 import { Message, ResolvedModel, ToolEventRecord } from "@/lib/types";
+import { DEFAULT_CONTEXT_MANAGEMENT } from "@/lib/defaults";
 import { rememberTool } from "@/lib/memory";
 import { loadSkillTool } from "@/lib/skills";
 import { buildSystemSegments, joinSegments } from "@/lib/systemPrompts";
 import { webFetchTool, webSearchTool } from "@/lib/webtools";
 import { runToolLoop, ToolEvent, ToolRegistry } from "@/lib/tools";
+import { makeContextRuntime } from "@/lib/contextManager";
 import { parseTranscript } from "@/lib/transcript";
 import * as Icons from "../icons";
 import ConfirmDelete from "../ConfirmDelete";
 import Markdown from "../Markdown";
+
+/**
+ * In-flight generation controllers keyed by conversation id, kept at module
+ * scope so they survive ChatView remounting (tab switches). This lets a
+ * generation continue in the background and still be stoppable when you return
+ * to the conversation, and prevents a remounted view from losing the handle.
+ */
+const convControllers = new Map<string, AbortController>();
 
 export default function ChatView({ conversationId }: { conversationId: string }) {
   const conversation = useMimir((s) => s.conversations[conversationId]);
@@ -35,17 +45,15 @@ export default function ChatView({ conversationId }: { conversationId: string })
 
   const [loads, setLoads] = useState<EndpointLoad[]>([]);
   const [loadingModels, setLoadingModels] = useState(true);
-  const [streaming, setStreaming] = useState(false);
+  // Whether THIS conversation is generating. Sourced from the store so it
+  // survives ChatView remounting on tab switches (the loop runs to completion
+  // in the background regardless of which conversation is on screen).
+  const streaming = useMimir((s) => !!s.streamingConvs[conversationId]);
+  const setConvStreaming = useMimir((s) => s.setConvStreaming);
   const [streamError, setStreamError] = useState<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
-
-  const streamingRef = useRef(false);
-  useEffect(() => {
-    streamingRef.current = streaming;
-  }, [streaming]);
 
   const models = useMemo(
     () => resolveEnabledModels(loads, settings.disabledModels),
@@ -138,9 +146,9 @@ export default function ChatView({ conversationId }: { conversationId: string })
       };
       appendMessage(conversationId, assistantMessage);
 
-      setStreaming(true);
+      setConvStreaming(conversationId, true);
       const controller = new AbortController();
-      abortRef.current = controller;
+      convControllers.set(conversationId, controller);
 
       // Build the tool registry from current settings. A tool only appears if
       // its master switch is on; the two web tools additionally require this
@@ -182,6 +190,18 @@ export default function ChatView({ conversationId }: { conversationId: string })
       let sawThinkClose = false;
       let interrupted = false;
 
+      const lastUserText =
+        [...history].reverse().find((m) => m.role === "user")?.content;
+      const context = makeContextRuntime({
+        endpoint: resolved.url,
+        apiKey: resolved.apiKey,
+        model: resolved.modelId,
+        settings:
+          state.settings.contextManagement ?? DEFAULT_CONTEXT_MANAGEMENT,
+        taskContext: () => lastUserText,
+        signal: controller.signal,
+      });
+
       try {
         const result = await runToolLoop(
           {
@@ -191,6 +211,7 @@ export default function ChatView({ conversationId }: { conversationId: string })
             messages: history.map((m) => ({ role: m.role, content: m.content })),
             system,
             registry,
+            context,
             signal: controller.signal,
           },
           (accumulated) => {
@@ -217,8 +238,13 @@ export default function ChatView({ conversationId }: { conversationId: string })
               useMimir.getState().conversations[conversationId]?.messages.find(
                 (m) => m.id === assistantMessage.id
               )?.toolEvents ?? [];
+            // Upsert by index so a tool's pending chip is replaced in place by
+            // its finished chip (rather than appended as a duplicate).
+            const next = existing.some((e) => e.index === event.index)
+              ? existing.map((e) => (e.index === event.index ? event : e))
+              : [...existing, event];
             patchMessage(conversationId, assistantMessage.id, {
-              toolEvents: [...existing, event],
+              toolEvents: next,
             });
           }
         );
@@ -249,17 +275,22 @@ export default function ChatView({ conversationId }: { conversationId: string })
             },
           });
         }
-        setStreaming(false);
-        abortRef.current = null;
+        // Only clear the flag/controller if this run still owns them — a newer
+        // run for the same conversation may have replaced them.
+        if (convControllers.get(conversationId) === controller) {
+          convControllers.delete(conversationId);
+          setConvStreaming(conversationId, false);
+        }
       }
     },
-    [conversationId, appendMessage, patchMessage, addMemory]
+    [conversationId, appendMessage, patchMessage, addMemory, setConvStreaming]
   );
 
   const send = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
-      if (!trimmed || streamingRef.current) return;
+      if (!trimmed || useMimir.getState().streamingConvs[conversationId])
+        return;
 
       const userMessage: Message = {
         id: uid("msg_"),
@@ -285,7 +316,7 @@ export default function ChatView({ conversationId }: { conversationId: string })
 
   const resend = useCallback(
     async (messageId: string) => {
-      if (streamingRef.current) return;
+      if (useMimir.getState().streamingConvs[conversationId]) return;
       truncateAfterMessage(conversationId, messageId);
       const current = useMimir.getState().conversations[conversationId];
       if (!current) return;
@@ -296,7 +327,8 @@ export default function ChatView({ conversationId }: { conversationId: string })
 
   const editMessage = useCallback(
     async (messageId: string, newContent: string) => {
-      if (streamingRef.current || !newContent.trim()) return;
+      if (useMimir.getState().streamingConvs[conversationId] || !newContent.trim())
+        return;
 
       // Remove everything after the target message
       truncateAfterMessage(conversationId, messageId);
@@ -311,8 +343,8 @@ export default function ChatView({ conversationId }: { conversationId: string })
   );
 
   const stop = useCallback(() => {
-    abortRef.current?.abort();
-  }, []);
+    convControllers.get(conversationId)?.abort();
+  }, [conversationId]);
 
   const handleDeleteMessage = useCallback(
     (id: string) => deleteMessage(conversationId, id),
@@ -978,6 +1010,29 @@ function ToolChip({ event }: { event?: ToolEventRecord }) {
     );
   }
 
+  // Recursive-summarization pass: a distinct, self-explanatory chip showing the
+  // context saved.
+  if (event.compaction) {
+    return <CompactionChip compaction={event.compaction} />;
+  }
+
+  // The tool is still executing: show a spinning chip with what it's doing, so a
+  // slow tool (e.g. a web search and any pruning of its result) is visibly in
+  // progress rather than looking like generation stalled.
+  if (event.pending) {
+    const pendingLabel = describeTool(event);
+    return (
+      <div className="inline-flex max-w-full items-center gap-2 self-start rounded-md border border-bronze-600/40 bg-bronze-600/10 px-2.5 py-1 text-xs">
+        <Icons.IconSpark className="h-4 w-4 shrink-0 mimir-spin text-bronze-400" />
+        <span className="font-mono text-bronze-300">{event.name}</span>
+        {pendingLabel && (
+          <span className="truncate text-parchment-400">{pendingLabel}</span>
+        )}
+        <span className="shrink-0 text-parchment-600">· running…</span>
+      </div>
+    );
+  }
+
   const label = describeTool(event);
 
   const savedContent =
@@ -997,6 +1052,15 @@ function ToolChip({ event }: { event?: ToolEventRecord }) {
         <span className="h-1.5 w-1.5 rounded-full bg-bronze-400" />
         <span className="font-mono text-bronze-300">{event.name}</span>
         <span className="text-parchment-600">{label}</span>
+        {event.pruned && (
+          <span
+            className="flex items-center gap-1 rounded-full border border-bronze-600/50 bg-bronze-600/15 px-1.5 py-0.5 font-mono text-[10px] text-bronze-300"
+            title={`Output distilled to save context: ${event.pruned.before.toLocaleString()} → ${event.pruned.after.toLocaleString()} characters (${prunePct(event.pruned)}% smaller)`}
+          >
+            <Icons.IconSliders className="h-3 w-3" />
+            distilled {fmtCount(event.pruned.before)}→{fmtCount(event.pruned.after)} (−{prunePct(event.pruned)}%)
+          </span>
+        )}
         <Icons.IconChevron
           className={["h-4 w-4 transition-transform", open ? "" : "-rotate-90"].join(" ")}
         />
@@ -1029,6 +1093,45 @@ function ToolChip({ event }: { event?: ToolEventRecord }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Compact a number for badges: 980 → "980", 8200 → "8.2k". */
+function fmtCount(n: number): string {
+  if (n < 1000) return String(n);
+  return `${(n / 1000).toFixed(n < 10000 ? 1 : 0)}k`;
+}
+
+/** Percent reduction from a prune (before → after), clamped to 0–99. */
+function prunePct(p: { before: number; after: number }): number {
+  if (p.before <= 0) return 0;
+  return Math.min(99, Math.max(0, Math.round(((p.before - p.after) / p.before) * 100)));
+}
+
+/**
+ * A distinct chip shown when the context manager compacted earlier history into
+ * a summary, making it obvious that (and how much) context was reclaimed.
+ */
+function CompactionChip({
+  compaction,
+}: {
+  compaction: { before: number; after: number };
+}) {
+  const saved = Math.max(0, compaction.before - compaction.after);
+  const pct =
+    compaction.before > 0 ? Math.round((saved / compaction.before) * 100) : 0;
+  return (
+    <div
+      className="inline-flex max-w-full items-center gap-2 self-start rounded-md border border-bronze-600/40 bg-bronze-600/10 px-2.5 py-1 text-xs text-parchment-300"
+      title={`Earlier conversation summarized: ~${compaction.before.toLocaleString()} → ~${compaction.after.toLocaleString()} tokens`}
+    >
+      <Icons.IconSliders className="h-4 w-4 shrink-0 text-bronze-400" />
+      <span className="font-medium text-bronze-200">Context compacted</span>
+      <span className="text-parchment-500">
+        ~{fmtCount(compaction.before)} → ~{fmtCount(compaction.after)} tokens
+        {saved > 0 ? ` · saved ~${fmtCount(saved)} (${pct}%)` : ""}
+      </span>
     </div>
   );
 }

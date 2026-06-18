@@ -42,10 +42,17 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "A non-empty 'query' is required." }, { status: 400 });
   }
 
-  const base = (body.searxngUrl ?? "").trim();
+  // Resolve SearXNG from the server's own environment first. In compose this is
+  // set to the internal service (http://searxng:8080), so search works with no
+  // user configuration and a stale browser setting (e.g. localhost) can't break
+  // it. Falls back to the URL the client sends when no env is set (host dev).
+  const base = (process.env.SEARXNG_URL || body.searxngUrl || "").trim();
   if (!base) {
     return Response.json(
-      { error: "No SearXNG URL configured. Set one in the Tools window." },
+      {
+        error:
+          "No SearXNG URL configured. Set SEARXNG_URL on the server, or a URL in the Tools window.",
+      },
       { status: 400 }
     );
   }

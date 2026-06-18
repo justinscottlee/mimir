@@ -75,6 +75,18 @@ export interface ToolEventRecord {
   name: string;
   args: Record<string, unknown>;
   result: string;
+  /** True while the tool is still executing (no result yet). */
+  pending?: boolean;
+  /**
+   * Set when this tool's output was distilled by the context manager. Holds the
+   * raw vs distilled character counts so the chip can show what was saved.
+   */
+  pruned?: { before: number; after: number };
+  /**
+   * Set on a synthetic event representing a recursive-summarization pass. Holds
+   * the estimated token counts before/after compaction.
+   */
+  compaction?: { before: number; after: number };
 }
 
 export interface Conversation {
@@ -94,11 +106,191 @@ export interface Conversation {
   webToolsEnabled?: boolean;
 }
 
+/* ============================================================================
+ * Workspaces — agentic sandboxes
+ *
+ * A workspace gives a model a container to operate in as an autonomous agent:
+ * a sandboxed virtual filesystem it can read and write through tools, an agent
+ * loop that runs plan→act→observe across many turns, and a run log so every
+ * action is auditable. The "sandbox" is capability-based — the agent's only
+ * actuators are the tools we hand it, and the filesystem tool is scoped to one
+ * workspace's tree, so the agent can never reach the host. The data model keeps
+ * the filesystem as plain data (WorkspaceFile[]) so the same UI can later sit on
+ * top of a container/chroot backend without changing.
+ * ==========================================================================*/
+
+/** A node in a workspace's virtual filesystem. */
+export interface WorkspaceFile {
+  /** Normalized POSIX-style absolute path, e.g. "/src/main.py" or "/notes". */
+  path: string;
+  /** Whether this node is a regular file or a directory. */
+  type: "file" | "dir";
+  /** File contents. Always "" for directories. */
+  content: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Tunable limits for the agent loop, configurable per workspace. */
+export interface WorkspaceAgentConfig {
+  /** Hard cap on loop iterations (model turns) before the run is stopped. */
+  maxSteps: number;
+  /** Budget on cumulative output (completion) tokens across a run. */
+  maxTokens: number;
+  /** Standing instructions prepended to the agent's system prompt. */
+  instructions?: string;
+  /**
+   * The agentic persona/system-prompt preset folded into every run in this
+   * workspace (see lib/workspace/agentPrompts.ts). Controls how methodical the
+   * agent is — planning and verifying. Defaults to "standard".
+   */
+  persona?: AgentPersonaKey;
+}
+
+/** Identifies one of the built-in agent personas in agentPrompts.ts. */
+export type AgentPersonaKey = "standard" | "planner" | "concise" | "researcher";
+
+/** Why an agent run ended (or that it's still going). */
+export type AgentRunStatus =
+  | "running"
+  | "done" // the model called task_complete
+  | "stopped" // the user aborted the run
+  | "idle" // the agent finished a turn and is awaiting a new prompt
+  | "max_steps" // hit the configured step cap
+  | "max_tokens" // hit the configured output-token budget
+  | "stalled" // the model stopped using tools without finishing
+  | "error"; // an exception ended the run
+
+/** One iteration of the agent loop: a single model completion + its tool runs. */
+export interface AgentStep {
+  index: number;
+  /** Assistant text for this step (may contain <think> blocks). */
+  content: string;
+  /** Tools executed this step, indexed to ⟦tool:N⟧ markers in `content`. */
+  toolEvents: ToolEventRecord[];
+  meta?: MessageMeta;
+  /** When this step began (ms epoch); used to interleave messages inline. */
+  at?: number;
+  /**
+   * Which conversational turn this step belongs to. Steps from the first prompt
+   * are turn 0; re-prompting the same agent starts turn 1, and so on. Lets the
+   * transcript group a multi-prompt run by the instruction that drove each part.
+   */
+  turn?: number;
+}
+
+/** State of a single checklist item in an agent's plan. */
+export type PlanItemStatus = "pending" | "active" | "done" | "blocked";
+
+/**
+ * One step in the agent's visible checklist plan. The agent creates and updates
+ * the plan through the planning tools; the user can also edit it, and the agent
+ * is told to re-read the plan when it changes. `note` carries an optional short
+ * status the agent or user attaches (e.g. why something is blocked).
+ */
+export interface PlanItem {
+  id: string;
+  text: string;
+  status: PlanItemStatus;
+  note?: string;
+}
+
+/**
+ * A single autonomous agent in a workspace. Despite the legacy name "run", an
+ * AgentRun is a *resumable* agent with a turn-by-turn history: the user can
+ * re-prompt it after it stops and it continues in the same context rather than
+ * starting fresh.
+ */
+export interface AgentRun {
+  id: string;
+  /** The first task the user handed the agent (the run's display title). */
+  goal: string;
+  status: AgentRunStatus;
+  steps: AgentStep[];
+  /** Model key (endpointId::modelId) the run used. */
+  model?: string;
+  /** Final summary the model passed to task_complete when it finished cleanly. */
+  summary?: string;
+  /** Human-readable reason when status is "error" / "stalled". */
+  error?: string;
+  /** Cumulative output (completion) tokens across all turns. */
+  totalTokens: number;
+  createdAt: number;
+  finishedAt?: number;
+
+  /* ---- resumable-agent / planning extensions ---- */
+
+  /**
+   * Every prompt the agent has received in order, including the initial goal.
+   * Length − 1 is the index of the latest turn. Re-prompting pushes a new entry
+   * and resumes the loop; the loop replays prior turns as the model's history.
+   */
+  prompts?: string[];
+  /** The agent's visible checklist plan, created and updated as it works. */
+  plan?: PlanItem[];
+  /** Short display label (currently mirrors the goal). */
+  title?: string;
+  /**
+   * One entry per completed turn, recording how that turn ended. This is what
+   * lets a finished turn's summary stay pinned inline where it finished, rather
+   * than a single run-level summary that gets overwritten by the next turn.
+   */
+  turns?: TurnOutcome[];
+}
+
+/** How a single turn of a resumable agent ended. */
+export interface TurnOutcome {
+  /** The turn index (matches AgentStep.turn and prompts[] index). */
+  turn: number;
+  /** The clean summary from task_complete, if the turn finished cleanly. */
+  summary?: string;
+  /** Human-readable reason when the turn ended in error/stalled. */
+  error?: string;
+  /** The status this turn settled into. */
+  status: AgentRunStatus;
+  finishedAt: number;
+}
+
 export interface Workspace {
   id: string;
   name: string;
   model?: string;
   createdAt: number;
+  /** The sandboxed virtual filesystem the agent operates in. */
+  files: WorkspaceFile[];
+  /** History of agent runs, oldest first. Capped for storage. */
+  runs: AgentRun[];
+  /** Agent loop limits and standing instructions. */
+  agent: WorkspaceAgentConfig;
+}
+
+/** The outcome of running one command in a workspace's execution sandbox. */
+export interface WorkspaceExecResult {
+  command: string;
+  stdout: string;
+  stderr: string;
+  /** Process exit code, or null if the command was killed before exiting. */
+  exitCode: number | null;
+  /** True if the command exceeded the time limit and was killed. */
+  timedOut: boolean;
+  durationMs: number;
+  /** True if stdout/stderr were truncated to fit the output cap. */
+  truncated?: boolean;
+  /** Files that exceeded the sync caps and were not mirrored to the store. */
+  skippedFiles?: string[];
+  /** The working directory the sandbox is left in after this command (cwd persists). */
+  cwd?: string;
+}
+
+/** Whether the execution sandbox is configured and the Docker daemon reachable. */
+export interface SandboxStatus {
+  /** The sandbox is turned on AND Docker responded to a ping. */
+  available: boolean;
+  /** Why the sandbox is unavailable, when it is. */
+  reason?: string;
+  image?: string;
+  /** Docker network mode in effect ("none" means no internet for code). */
+  network?: string;
 }
 
 /** A configured llama.cpp server or OpenAI-compatible API endpoint. */
@@ -157,6 +349,13 @@ export interface WebSearchConfig {
   maxResults: number;
   /** SearXNG safe-search level: 0 off, 1 moderate, 2 strict. */
   safeSearch: 0 | 1 | 2;
+  /**
+   * Minimum milliseconds between consecutive web searches, enforced globally
+   * across all conversations and agents. Spaces out (and serializes) outbound
+   * searches so a search engine is less likely to rate-limit or captcha-block
+   * you. 0 disables throttling.
+   */
+  throttleMs: number;
 }
 
 /**
@@ -195,6 +394,38 @@ export interface Settings {
   username: string;
   /** Tool availability and parameters (web search/fetch, built-ins). */
   tools: ToolSettings;
+  /** Active context-window management (tool-output pruning + summarization). */
+  contextManagement: ContextManagementSettings;
+}
+
+/**
+ * Settings for keeping long model loops within a bounded context window. Both
+ * conversations and workspace agents honor these.
+ */
+export interface ContextManagementSettings {
+  /**
+   * Tool-output pruning: route verbose tool results through a transient model
+   * instance that distills them to what's relevant before they enter context.
+   */
+  toolPruning: {
+    enabled: boolean;
+    /** Only prune outputs longer than this many characters. */
+    thresholdChars: number;
+    /** Which tools to prune, by name (e.g. web_search, web_fetch, run_command). */
+    tools: string[];
+  };
+  /**
+   * Recursive summarization: once the working history exceeds the token
+   * threshold, compress the oldest messages into a memory block and keep the
+   * most recent ones verbatim.
+   */
+  summarization: {
+    enabled: boolean;
+    /** Approximate context-token threshold that triggers a compression pass. */
+    thresholdTokens: number;
+    /** How many of the most recent messages to always keep uncompressed. */
+    keepRecent: number;
+  };
 }
 
 /**

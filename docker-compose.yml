@@ -1,4 +1,46 @@
 services:
+  # The Mimir app itself. Runs the Next.js dev server and reaches the host's
+  # Docker daemon through the mounted socket — that's what lets Workspaces
+  # execute code. Build + start everything with: docker compose up --build
+  mimir:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mimir
+    env_file:
+      - .env
+    environment:
+      # Inside the compose network the data stores are reached by service name,
+      # not localhost. These override whatever .env has, so .env can keep its
+      # localhost values for running the app directly on your host instead.
+      DATABASE_URL: postgres://mimir:mimir@postgres:5432/mimir
+      VALKEY_URL: redis://valkey:6379
+      # Web search talks to the bundled SearXNG container directly — no Tools URL
+      # needed. (Point this elsewhere to use an external SearXNG instead.)
+      SEARXNG_URL: http://searxng:8080
+    # Lets the container reach services running on the host (e.g. a llama.cpp
+    # server on localhost) via http://host.docker.internal:<port>.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "3000:3000"
+    volumes:
+      # Hand the container the host Docker daemon. DOCKER_SOCK lets macOS / Colima
+      # / rootless users point at a non-standard socket; inside the container it
+      # is always /var/run/docker.sock, where dockerode looks by default.
+      - ${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock
+      # Live source for hot reload, while keeping the container's own
+      # (Linux-native) node_modules and build output.
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    restart: unless-stopped
+
   postgres:
     image: postgres:16-alpine
     container_name: mimir-postgres

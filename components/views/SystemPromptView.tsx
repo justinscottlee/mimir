@@ -76,11 +76,11 @@ export default function SystemPromptView() {
       {/* Header + full-prompt control */}
       <div className="shrink-0 border-b border-ink-700 p-4">
         <p className="mb-3 text-xs leading-relaxed text-parchment-600">
-          These prompts are sent ahead of every conversation. Toggle the presets
-          you want, add your own, and use “View full system prompt” to see
-          exactly what the model receives — including the text generated from
-          your memories and skills. {enabledCount} prompt
-          {enabledCount === 1 ? "" : "s"} active.
+          These prompts are sent ahead of the model and apply everywhere — both
+          your chats and your workspace agents. Toggle the presets you want, add
+          your own, and use “View full system prompt” to see exactly what the
+          model receives, including the text generated from your memories and
+          skills. {enabledCount} prompt{enabledCount === 1 ? "" : "s"} enabled.
         </p>
         <button
           onClick={() => setShowFull((v) => !v)}
@@ -95,9 +95,7 @@ export default function SystemPromptView() {
             ].join(" ")}
           />
         </button>
-        {showFull && (
-          <FullPromptPanel segments={segments} toolNames={toolNames} />
-        )}
+        {showFull && <FullPromptPanel segments={segments} toolNames={toolNames} />}
       </div>
 
       {/* List */}

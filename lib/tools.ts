@@ -21,6 +21,9 @@ export type ToolRegistry = Record<string, ToolHandler>;
 /** OpenAI-style chat message, including the tool/assistant-tool-call shapes. */
 export type ChatMessage = ApiMessage;
 
+/** Reserved synthetic tool name used to surface a summarization pass in the UI. */
+const CONTEXT_COMPACTION_TOOL = "context_compaction";
+
 export interface RunLoopParams {
   endpoint: string;
   /** Bearer token for hosted APIs; omitted for local llama.cpp. */
@@ -33,6 +36,8 @@ export interface RunLoopParams {
   signal?: AbortSignal;
   /** Safety cap on tool rounds so a confused model can't spin forever. */
   maxRounds?: number;
+  /** Optional active context management (tool-output pruning + summarization). */
+  context?: import("./contextManager").ContextRuntime;
 }
 
 export interface ToolEvent {
@@ -41,6 +46,12 @@ export interface ToolEvent {
   name: string;
   args: Record<string, unknown>;
   result: string;
+  /** True while the tool is still executing (no result yet). */
+  pending?: boolean;
+  /** Raw vs distilled character counts when the output was pruned. */
+  pruned?: { before: number; after: number };
+  /** Token counts before/after for a recursive-summarization pass. */
+  compaction?: { before: number; after: number };
 }
 
 /**
@@ -88,11 +99,17 @@ export async function runToolLoop(
     registry,
     signal,
     maxRounds = 5,
+    context,
   }: RunLoopParams,
   onText: (accumulated: string) => void,
   onToolEvent?: (event: ToolEvent) => void
 ): Promise<RunLoopResult> {
-  const tools = Object.values(registry).map((t) => t.def);
+  // Tool-output pruning (if enabled) wraps the registry so verbose results get
+  // distilled by a transient model call before entering context.
+  const liveRegistry = context?.pruneRegistry
+    ? context.pruneRegistry(registry)
+    : registry;
+  const tools = Object.values(liveRegistry).map((t) => t.def);
   const working: ChatMessage[] = [...messages];
   const toolEvents: ToolEvent[] = [];
 
@@ -109,6 +126,31 @@ export async function runToolLoop(
   let committed = "";
 
   for (let round = 0; round < maxRounds; round++) {
+    // Recursive summarization: compress old history if the context grew large.
+    // When it fires, surface it as a chip so it's visible that context was saved.
+    if (context?.manageContext) {
+      const managed = await context.manageContext(working);
+      if (managed.compressed) {
+        working.length = 0;
+        working.push(...managed.messages);
+        const event: ToolEvent = {
+          index: toolEvents.length,
+          name: CONTEXT_COMPACTION_TOOL,
+          args: {},
+          result:
+            "Compressed the earlier part of this conversation into a summary to free up context.",
+          compaction: {
+            before: managed.beforeTokens ?? 0,
+            after: managed.afterTokens ?? 0,
+          },
+        };
+        committed += toolMarker(event.index);
+        toolEvents.push(event);
+        onToolEvent?.(event);
+        onText(committed);
+      }
+    }
+
     const result = await streamChat(
       {
         endpoint,
@@ -160,7 +202,7 @@ export async function runToolLoop(
     // Execute each call and append its result.
     for (let i = 0; i < toolCalls.length; i++) {
       const call = toolCalls[i];
-      const handler = registry[call.name];
+      const handler = liveRegistry[call.name];
       let resultText: string;
       let parsedArgs: Record<string, unknown> = {};
       try {
@@ -172,6 +214,22 @@ export async function runToolLoop(
       if (!handler) {
         resultText = `Error: no tool named "${call.name}" is available.`;
       } else {
+        // Reserve this event's slot and show a live, spinning chip *before* the
+        // tool runs, so a slow tool (a web search, plus any pruning of its
+        // output) is visibly in progress instead of looking like generation
+        // stalled. We re-emit the same index with the result when it finishes.
+        const pendingIndex = toolEvents.length;
+        const pendingEvent: ToolEvent = {
+          index: pendingIndex,
+          name: call.name,
+          args: parsedArgs,
+          result: "",
+          pending: true,
+        };
+        committed += toolMarker(pendingIndex);
+        toolEvents.push(pendingEvent);
+        onToolEvent?.(pendingEvent);
+        onText(committed);
         try {
           resultText = await handler.run(parsedArgs);
         } catch (e) {
@@ -180,13 +238,23 @@ export async function runToolLoop(
       }
 
       const event: ToolEvent = {
-        index: toolEvents.length,
+        index: handler ? toolEvents.length - 1 : toolEvents.length,
         name: call.name,
         args: parsedArgs,
         result: resultText,
       };
-      committed += toolMarker(event.index);
-      toolEvents.push(event);
+      // If the context manager distilled this tool's output, tag the chip.
+      const pruneInfo = context?.takePruneInfo();
+      if (pruneInfo) {
+        event.pruned = { before: pruneInfo.before, after: pruneInfo.after };
+      }
+      if (handler) {
+        // Replace the pending chip (same index) with the finished one.
+        toolEvents[event.index] = event;
+      } else {
+        committed += toolMarker(event.index);
+        toolEvents.push(event);
+      }
       onToolEvent?.(event);
       onText(committed); // reflect the new chip immediately
 

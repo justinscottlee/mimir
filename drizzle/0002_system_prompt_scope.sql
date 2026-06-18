@@ -1,0 +1,2 @@
+ALTER TABLE "system_prompts" ADD COLUMN "scope_conversations" boolean DEFAULT true NOT NULL;--> statement-breakpoint
+ALTER TABLE "system_prompts" ADD COLUMN "scope_workspaces" boolean DEFAULT false NOT NULL;

@@ -1,10 +1,12 @@
 import {
+  ContextManagementSettings,
   Endpoint,
   Settings,
   SystemPrompt,
   ToolSettings,
   WindowKind,
   WindowSizeSpec,
+  WorkspaceAgentConfig,
 } from "./types";
 import { SYSTEM_PROMPT_PRESETS } from "./systemPrompts";
 
@@ -39,6 +41,7 @@ export const DEFAULT_TOOL_SETTINGS: ToolSettings = {
     searxngUrl: "http://localhost:8888",
     maxResults: 5,
     safeSearch: 1,
+    throttleMs: 0,
   },
   webFetch: {
     enabled: false,
@@ -50,10 +53,44 @@ export const DEFAULT_TOOL_SETTINGS: ToolSettings = {
   },
 };
 
+/**
+ * Defaults for the workspace agent loop. `maxSteps` caps how many turns the
+ * agent can take before we stop it; `maxTokens` is a budget on cumulative
+ * output tokens across the run. Both are deliberately modest so a confused
+ * model can't burn an endpoint — raise them per workspace for bigger jobs.
+ */
+export const DEFAULT_AGENT_CONFIG: WorkspaceAgentConfig = {
+  maxSteps: 12,
+  maxTokens: 8000,
+  persona: "standard",
+};
+
+/** How many runs to keep per workspace before trimming the oldest. */
+export const MAX_WORKSPACE_RUNS = 25;
+
 /** The endpoint every new account starts with. */
 export function defaultEndpoints(): Endpoint[] {
   return [{ id: "ep_default", name: "Local", url: "http://localhost:8080" }];
 }
+
+/**
+ * Defaults for active context management. Tool-output pruning is on by default
+ * for the high-volume web/shell tools (it strictly helps once outputs get
+ * large); recursive summarization is on with a generous threshold so it only
+ * fires on genuinely long sessions. All thresholds are user-tunable.
+ */
+export const DEFAULT_CONTEXT_MANAGEMENT: ContextManagementSettings = {
+  toolPruning: {
+    enabled: true,
+    thresholdChars: 4000,
+    tools: ["web_search", "web_fetch", "run_command"],
+  },
+  summarization: {
+    enabled: true,
+    thresholdTokens: 24000,
+    keepRecent: 6,
+  },
+};
 
 /** The settings a brand-new user starts with. `username` defaults from email. */
 export function defaultSettings(username = "admin"): Settings {
@@ -62,6 +99,7 @@ export function defaultSettings(username = "admin"): Settings {
     disabledModels: [],
     username,
     tools: DEFAULT_TOOL_SETTINGS,
+    contextManagement: DEFAULT_CONTEXT_MANAGEMENT,
   };
 }
 

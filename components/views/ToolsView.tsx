@@ -1,6 +1,8 @@
 "use client";
 
 import { useMimir } from "@/lib/store";
+import { DEFAULT_CONTEXT_MANAGEMENT } from "@/lib/defaults";
+import { ContextManagementSettings } from "@/lib/types";
 import * as Icons from "../icons";
 
 /**
@@ -15,6 +17,32 @@ import * as Icons from "../icons";
 export default function ToolsView() {
   const tools = useMimir((s) => s.settings.tools);
   const update = useMimir((s) => s.updateToolSettings);
+  const setSettings = useMimir((s) => s.setSettings);
+  const ctx =
+    useMimir((s) => s.settings.contextManagement) ?? DEFAULT_CONTEXT_MANAGEMENT;
+
+  // Patch a nested slice of contextManagement, preserving the rest.
+  const patchPruning = (
+    p: Partial<ContextManagementSettings["toolPruning"]>
+  ) =>
+    setSettings({
+      contextManagement: { ...ctx, toolPruning: { ...ctx.toolPruning, ...p } },
+    });
+  const patchSummary = (
+    p: Partial<ContextManagementSettings["summarization"]>
+  ) =>
+    setSettings({
+      contextManagement: {
+        ...ctx,
+        summarization: { ...ctx.summarization, ...p },
+      },
+    });
+  const togglePrunedTool = (name: string, on: boolean) => {
+    const set = new Set(ctx.toolPruning.tools);
+    if (on) set.add(name);
+    else set.delete(name);
+    patchPruning({ tools: [...set] });
+  };
 
   return (
     <div className="flex flex-col gap-5 p-5">
@@ -70,6 +98,21 @@ export default function ToolsView() {
             </select>
           </Field>
         </div>
+        <Field label="Minimum seconds between searches (throttle)">
+          <NumberInput
+            value={Math.round((tools.webSearch.throttleMs ?? 0) / 1000)}
+            min={0}
+            max={120}
+            onChange={(n) =>
+              update({ webSearch: { throttleMs: Math.max(0, n) * 1000 } })
+            }
+          />
+          <p className="mt-1 text-[11px] leading-relaxed text-parchment-600">
+            Spaces out and serializes web searches across all conversations and
+            agents. Raise this if your search engine starts rate-limiting or
+            captcha-blocking you. 0 means no throttle.
+          </p>
+        </Field>
       </ToolCard>
 
       {/* Web fetch */}
@@ -122,9 +165,148 @@ export default function ToolsView() {
           />
         </div>
       </div>
+
+      {/* Context management */}
+      <div>
+        <div className="mb-2 font-mono text-xs uppercase tracking-[0.2em] text-parchment-600">
+          Context management
+        </div>
+        <p className="mb-3 max-w-xl text-[11px] leading-relaxed text-parchment-600">
+          Keeps long sessions within a bounded context window using brief,
+          one-shot calls to the same model. Applies to both conversations and
+          workspace agents.
+        </p>
+
+        <div className="flex flex-col gap-3">
+          {/* Tool-output pruning */}
+          <div className="rounded-lg border border-ink-700 bg-ink-900 p-3">
+            <div className="flex items-start gap-3">
+              <Icons.IconWrench className="mt-0.5 h-4 w-4 shrink-0 text-bronze-400" />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-parchment-100">
+                    Tool-output pruning
+                  </span>
+                </div>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-parchment-400">
+                  Verbose tool results are handed to a transient model instance
+                  that distills them to what's relevant — keyed to the call (the
+                  query, URL, or command) — before they enter context.
+                </p>
+              </div>
+              <Switch
+                enabled={ctx.toolPruning.enabled}
+                onToggle={(v) => patchPruning({ enabled: v })}
+                label="Tool-output pruning"
+              />
+            </div>
+            {ctx.toolPruning.enabled && (
+              <div className="mt-3 flex flex-col gap-3 border-t border-ink-700 pt-3">
+                <Field label="Only prune outputs longer than (characters)">
+                  <NumberInput
+                    value={ctx.toolPruning.thresholdChars}
+                    min={500}
+                    max={100000}
+                    step={500}
+                    onChange={(n) => patchPruning({ thresholdChars: n })}
+                  />
+                </Field>
+                <div>
+                  <div className="mb-1.5 text-xs text-parchment-600">
+                    Tools to prune
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {PRUNABLE_TOOLS.map((t) => {
+                      const on = ctx.toolPruning.tools.includes(t);
+                      return (
+                        <button
+                          key={t}
+                          onClick={() => togglePrunedTool(t, !on)}
+                          aria-pressed={on}
+                          className={[
+                            "flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[11px] transition-colors",
+                            on
+                              ? "border-bronze-600/60 bg-bronze-600/15 text-bronze-300"
+                              : "border-ink-700 text-parchment-600 hover:border-parchment-600 hover:text-parchment-400",
+                          ].join(" ")}
+                        >
+                          <span
+                            className={[
+                              "h-1.5 w-1.5 rounded-full",
+                              on ? "bg-bronze-400" : "bg-ink-700",
+                            ].join(" ")}
+                          />
+                          {t}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-parchment-600">
+                    read_file is intentionally left out by default — agents need
+                    a file's exact contents to edit it.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Recursive summarization */}
+          <div className="rounded-lg border border-ink-700 bg-ink-900 p-3">
+            <div className="flex items-start gap-3">
+              <Icons.IconSliders className="mt-0.5 h-4 w-4 shrink-0 text-bronze-400" />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-parchment-100">
+                    Recursive summarization
+                  </span>
+                </div>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-parchment-400">
+                  Once the working history grows past the token threshold, the
+                  oldest turns are compressed into a memory block and the most
+                  recent ones are kept verbatim.
+                </p>
+              </div>
+              <Switch
+                enabled={ctx.summarization.enabled}
+                onToggle={(v) => patchSummary({ enabled: v })}
+                label="Recursive summarization"
+              />
+            </div>
+            {ctx.summarization.enabled && (
+              <div className="mt-3 flex flex-col gap-3 border-t border-ink-700 pt-3">
+                <Field label="Summarize when context exceeds (≈ tokens)">
+                  <NumberInput
+                    value={ctx.summarization.thresholdTokens}
+                    min={2000}
+                    max={500000}
+                    step={1000}
+                    onChange={(n) => patchSummary({ thresholdTokens: n })}
+                  />
+                </Field>
+                <Field label="Recent messages to always keep">
+                  <NumberInput
+                    value={ctx.summarization.keepRecent}
+                    min={2}
+                    max={50}
+                    step={1}
+                    onChange={(n) => patchSummary({ keepRecent: n })}
+                  />
+                </Field>
+                <p className="text-[11px] leading-relaxed text-parchment-600">
+                  Token counts are estimated (~4 chars/token), so treat the
+                  threshold as approximate.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
+
+/** Tools offered for output pruning in the settings UI. */
+const PRUNABLE_TOOLS = ["web_search", "web_fetch", "run_command", "read_file"];
 
 function ToolCard({
   icon,

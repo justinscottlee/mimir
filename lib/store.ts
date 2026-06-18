@@ -2,23 +2,33 @@
 
 import { create } from "zustand";
 import {
+  AgentRun,
+  AgentRunStatus,
+  AgentStep,
   Conversation,
   Endpoint,
   FloatingWindow,
   Memory,
   Message,
+  PlanItem,
   Settings,
   Skill,
   SystemPrompt,
   Tab,
   TabKind,
+  ToolEventRecord,
   ToolSettings,
+  TurnOutcome,
   UserStateSnapshot,
   WindowKind,
   Workspace,
+  WorkspaceAgentConfig,
+  WorkspaceFile,
 } from "./types";
 import {
+  DEFAULT_AGENT_CONFIG,
   DEFAULT_TOOL_SETTINGS,
+  MAX_WORKSPACE_RUNS,
   WINDOW_SPECS,
   defaultSettings,
   seedSystemPrompts,
@@ -28,7 +38,13 @@ import * as sync from "./sync";
 
 // Re-exported so existing imports (`import { uid, useMimir, WINDOW_SPECS }
 // from "@/lib/store"`) keep working unchanged.
-export { uid, WINDOW_SPECS, DEFAULT_TOOL_SETTINGS, seedSystemPrompts };
+export {
+  uid,
+  WINDOW_SPECS,
+  DEFAULT_TOOL_SETTINGS,
+  DEFAULT_AGENT_CONFIG,
+  seedSystemPrompts,
+};
 
 /** A shallow-per-section patch shape for updateToolSettings. */
 export interface PartialToolSettings {
@@ -49,6 +65,13 @@ interface MimirState {
   windows: FloatingWindow[];
   zTop: number;
   conversations: Record<string, Conversation>;
+  /**
+   * Which conversations currently have an in-flight generation, keyed by id.
+   * Kept in the store (not component state) so it survives ChatView remounting
+   * when you switch tabs — a generation started in one tab stays visible and
+   * guarded against double-sends when you come back.
+   */
+  streamingConvs: Record<string, boolean>;
   workspaces: Record<string, Workspace>;
   memories: Record<string, Memory>;
   skills: Record<string, Skill>;
@@ -84,6 +107,8 @@ interface MimirState {
   deleteConversation: (id: string) => void;
   deleteConversations: (ids: string[]) => void;
   appendMessage: (conversationId: string, message: Message) => void;
+  /** Mark a conversation as actively generating (or not). */
+  setConvStreaming: (conversationId: string, streaming: boolean) => void;
   patchMessage: (
     conversationId: string,
     messageId: string,
@@ -99,6 +124,49 @@ interface MimirState {
   openWorkspace: (id: string) => void;
   deleteWorkspace: (id: string) => void;
   setWorkspaceName: (id: string, name: string) => void;
+  setWorkspaceModel: (id: string, model: string) => void;
+  /** Replace the workspace's virtual filesystem (used by the fs tool + editor). */
+  setWorkspaceFiles: (id: string, files: WorkspaceFile[]) => void;
+  /** Patch the agent config (max steps/tokens, standing instructions). */
+  setWorkspaceAgentConfig: (
+    id: string,
+    patch: Partial<WorkspaceAgentConfig>
+  ) => void;
+  // Workspace agent runs
+  startWorkspaceRun: (id: string, run: AgentRun) => void;
+  updateWorkspaceRun: (
+    id: string,
+    runId: string,
+    patch: Partial<Omit<AgentRun, "id" | "steps">>
+  ) => void;
+  appendRunStep: (id: string, runId: string, step: AgentStep) => void;
+  patchRunStep: (
+    id: string,
+    runId: string,
+    stepIndex: number,
+    patch: Partial<Omit<AgentStep, "index">>
+  ) => void;
+  appendRunToolEvent: (
+    id: string,
+    runId: string,
+    stepIndex: number,
+    event: ToolEventRecord
+  ) => void;
+  deleteWorkspaceRun: (id: string, runId: string) => void;
+  clearWorkspaceRuns: (id: string) => void;
+  /**
+   * Append a new prompt to a run's history (used when re-prompting an existing
+   * agent). Returns the new turn index (0-based), or -1 if the run is missing.
+   */
+  appendRunPrompt: (id: string, runId: string, prompt: string) => number;
+  /** Replace a run's checklist plan (driven by the plan tools and user edits). */
+  setRunPlan: (id: string, runId: string, plan: PlanItem[]) => void;
+  /** Record how a turn ended, so its summary stays pinned inline to that turn. */
+  recordTurnOutcome: (
+    id: string,
+    runId: string,
+    outcome: TurnOutcome
+  ) => void;
 
   // Memories
   addMemory: (
@@ -158,6 +226,7 @@ function emptyState() {
     windows: [] as FloatingWindow[],
     zTop: 10,
     conversations: {} as Record<string, Conversation>,
+    streamingConvs: {} as Record<string, boolean>,
     workspaces: {} as Record<string, Workspace>,
     memories: {} as Record<string, Memory>,
     skills: {} as Record<string, Skill>,
@@ -414,6 +483,15 @@ export const useMimir = create<MimirState>()((set, get) => ({
       };
     }),
 
+  setConvStreaming: (conversationId, streaming) =>
+    set((s) => {
+      if (!!s.streamingConvs[conversationId] === streaming) return s;
+      const next = { ...s.streamingConvs };
+      if (streaming) next[conversationId] = true;
+      else delete next[conversationId];
+      return { streamingConvs: next };
+    }),
+
   patchMessage: (conversationId, messageId, patch) =>
     set((s) => {
       const conv = s.conversations[conversationId];
@@ -504,6 +582,9 @@ export const useMimir = create<MimirState>()((set, get) => ({
       name: "New workspace",
       model: get().settings.defaultWorkspaceModel,
       createdAt: Date.now(),
+      files: [],
+      runs: [],
+      agent: { ...DEFAULT_AGENT_CONFIG },
     };
     set((s) => ({ workspaces: { ...s.workspaces, [id]: workspace } }));
     get().openTab("workspace", id, workspace.name);
@@ -540,6 +621,218 @@ export const useMimir = create<MimirState>()((set, get) => ({
           t.kind === "workspace" && t.refId === id ? { ...t, title: name } : t
         ),
       };
+    }),
+
+  setWorkspaceModel: (id, model) =>
+    set((s) => {
+      const ws = s.workspaces[id];
+      if (!ws) return s;
+      return { workspaces: { ...s.workspaces, [id]: { ...ws, model } } };
+    }),
+
+  setWorkspaceFiles: (id, files) =>
+    set((s) => {
+      const ws = s.workspaces[id];
+      if (!ws) return s;
+      return { workspaces: { ...s.workspaces, [id]: { ...ws, files } } };
+    }),
+
+  setWorkspaceAgentConfig: (id, patch) =>
+    set((s) => {
+      const ws = s.workspaces[id];
+      if (!ws) return s;
+      return {
+        workspaces: {
+          ...s.workspaces,
+          [id]: { ...ws, agent: { ...ws.agent, ...patch } },
+        },
+      };
+    }),
+
+  // ---------- Workspace agent runs ----------
+
+  startWorkspaceRun: (id, run) =>
+    set((s) => {
+      const ws = s.workspaces[id];
+      if (!ws) return s;
+      // Keep only the most recent runs to bound the stored workspace size.
+      const runs = [...ws.runs, run].slice(-MAX_WORKSPACE_RUNS);
+      return { workspaces: { ...s.workspaces, [id]: { ...ws, runs } } };
+    }),
+
+  updateWorkspaceRun: (id, runId, patch) =>
+    set((s) => {
+      const ws = s.workspaces[id];
+      if (!ws) return s;
+      return {
+        workspaces: {
+          ...s.workspaces,
+          [id]: {
+            ...ws,
+            runs: ws.runs.map((r) => (r.id === runId ? { ...r, ...patch } : r)),
+          },
+        },
+      };
+    }),
+
+  appendRunStep: (id, runId, step) =>
+    set((s) => {
+      const ws = s.workspaces[id];
+      if (!ws) return s;
+      return {
+        workspaces: {
+          ...s.workspaces,
+          [id]: {
+            ...ws,
+            runs: ws.runs.map((r) =>
+              r.id === runId ? { ...r, steps: [...r.steps, step] } : r
+            ),
+          },
+        },
+      };
+    }),
+
+  patchRunStep: (id, runId, stepIndex, patch) =>
+    set((s) => {
+      const ws = s.workspaces[id];
+      if (!ws) return s;
+      return {
+        workspaces: {
+          ...s.workspaces,
+          [id]: {
+            ...ws,
+            runs: ws.runs.map((r) =>
+              r.id === runId
+                ? {
+                    ...r,
+                    steps: r.steps.map((st) =>
+                      st.index === stepIndex ? { ...st, ...patch } : st
+                    ),
+                  }
+                : r
+            ),
+          },
+        },
+      };
+    }),
+
+  appendRunToolEvent: (id, runId, stepIndex, event) =>
+    set((s) => {
+      const ws = s.workspaces[id];
+      if (!ws) return s;
+      return {
+        workspaces: {
+          ...s.workspaces,
+          [id]: {
+            ...ws,
+            runs: ws.runs.map((r) =>
+              r.id === runId
+                ? {
+                    ...r,
+                    steps: r.steps.map((st) => {
+                      if (st.index !== stepIndex) return st;
+                      // Upsert by tool index: a tool first reports itself as
+                      // pending (so a live chip shows), then reports again with
+                      // its result, replacing the pending entry in place.
+                      const existing = st.toolEvents.findIndex(
+                        (e) => e.index === event.index
+                      );
+                      const toolEvents =
+                        existing >= 0
+                          ? st.toolEvents.map((e, i) =>
+                              i === existing ? event : e
+                            )
+                          : [...st.toolEvents, event];
+                      return { ...st, toolEvents };
+                    }),
+                  }
+                : r
+            ),
+          },
+        },
+      };
+    }),
+
+  deleteWorkspaceRun: (id, runId) =>
+    set((s) => {
+      const ws = s.workspaces[id];
+      if (!ws) return s;
+      return {
+        workspaces: {
+          ...s.workspaces,
+          [id]: { ...ws, runs: ws.runs.filter((r) => r.id !== runId) },
+        },
+      };
+    }),
+
+  appendRunPrompt: (id, runId, prompt) => {
+    let turnIndex = -1;
+    set((s) => {
+      const ws = s.workspaces[id];
+      if (!ws) return s;
+      return {
+        workspaces: {
+          ...s.workspaces,
+          [id]: {
+            ...ws,
+            runs: ws.runs.map((r) => {
+              if (r.id !== runId) return r;
+              const prompts = r.prompts ?? (r.goal ? [r.goal] : []);
+              const nextPrompts = [...prompts, prompt];
+              turnIndex = nextPrompts.length - 1;
+              return { ...r, prompts: nextPrompts };
+            }),
+          },
+        },
+      };
+    });
+    return turnIndex;
+  },
+
+  setRunPlan: (id, runId, plan) =>
+    set((s) => {
+      const ws = s.workspaces[id];
+      if (!ws) return s;
+      return {
+        workspaces: {
+          ...s.workspaces,
+          [id]: {
+            ...ws,
+            runs: ws.runs.map((r) => (r.id === runId ? { ...r, plan } : r)),
+          },
+        },
+      };
+    }),
+
+  recordTurnOutcome: (id, runId, outcome) =>
+    set((s) => {
+      const ws = s.workspaces[id];
+      if (!ws) return s;
+      return {
+        workspaces: {
+          ...s.workspaces,
+          [id]: {
+            ...ws,
+            runs: ws.runs.map((r) => {
+              if (r.id !== runId) return r;
+              const rest = (r.turns ?? []).filter(
+                (t) => t.turn !== outcome.turn
+              );
+              return {
+                ...r,
+                turns: [...rest, outcome].sort((a, b) => a.turn - b.turn),
+              };
+            }),
+          },
+        },
+      };
+    }),
+
+  clearWorkspaceRuns: (id) =>
+    set((s) => {
+      const ws = s.workspaces[id];
+      if (!ws) return s;
+      return { workspaces: { ...s.workspaces, [id]: { ...ws, runs: [] } } };
     }),
 
   // ---------- Memories ----------

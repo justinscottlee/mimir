@@ -1,10 +1,12 @@
 import "server-only";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, notInArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   conversations as convT,
   messages as msgT,
   workspaces as wsT,
+  workspaceFiles as wfT,
+  workspaceRuns as wrT,
   memories as memT,
   skills as skillT,
   systemPrompts as spT,
@@ -12,6 +14,9 @@ import {
   uiState as uiT,
 } from "@/lib/db/schema";
 import {
+  AgentRun,
+  AgentRunStatus,
+  AgentStep,
   Conversation,
   Memory,
   Message,
@@ -25,8 +30,12 @@ import {
   UserStateSnapshot,
   UserUiState,
   Workspace,
+  WorkspaceAgentConfig,
+  WorkspaceFile,
 } from "@/lib/types";
 import {
+  DEFAULT_AGENT_CONFIG,
+  DEFAULT_CONTEXT_MANAGEMENT,
   defaultSettings,
   seedSystemPrompts,
 } from "@/lib/defaults";
@@ -70,6 +79,7 @@ async function ensureSeeded(userId: string, username: string): Promise<void> {
         defaultWorkspaceModel: s.defaultWorkspaceModel,
         username: s.username,
         tools: s.tools,
+        contextManagement: s.contextManagement,
         updatedAt: new Date(),
       })
       .onConflictDoNothing();
@@ -99,6 +109,20 @@ async function ensureSeeded(userId: string, username: string): Promise<void> {
       }))
     )
     .onConflictDoNothing();
+
+  // Remove preset rows whose preset was retired from the catalog (e.g. the
+  // workspace-only presets), so they don't linger in existing databases. Custom
+  // (user-authored) prompts are never touched.
+  const seededIds = seeded.map((p) => p.id);
+  await db
+    .delete(spT)
+    .where(
+      and(
+        eq(spT.userId, userId),
+        eq(spT.source, "preset"),
+        notInArray(spT.id, seededIds)
+      )
+    );
 }
 
 /* ------------------------------ read path ------------------------------- */
@@ -130,6 +154,8 @@ async function readUserState(
     convRows,
     msgRows,
     wsRows,
+    wfRows,
+    wrRows,
     memRows,
     skillRows,
     spRows,
@@ -144,6 +170,17 @@ async function readUserState(
       .where(eq(convT.userId, userId))
       .orderBy(asc(msgT.seq)),
     db.select().from(wsT).where(eq(wsT.userId, userId)),
+    db
+      .select({ f: wfT })
+      .from(wfT)
+      .innerJoin(wsT, eq(wfT.workspaceId, wsT.id))
+      .where(eq(wsT.userId, userId)),
+    db
+      .select({ r: wrT })
+      .from(wrT)
+      .innerJoin(wsT, eq(wrT.workspaceId, wsT.id))
+      .where(eq(wsT.userId, userId))
+      .orderBy(asc(wrT.seq)),
     db.select().from(memT).where(eq(memT.userId, userId)),
     db.select().from(skillT).where(eq(skillT.userId, userId)),
     db.select().from(spT).where(eq(spT.userId, userId)),
@@ -182,6 +219,38 @@ async function readUserState(
     };
   }
 
+  // Group workspace files and runs under their workspace.
+  const filesByWs = new Map<string, WorkspaceFile[]>();
+  for (const { f } of wfRows) {
+    const list = filesByWs.get(f.workspaceId) ?? [];
+    list.push({
+      path: f.path,
+      type: f.type as WorkspaceFile["type"],
+      content: f.content,
+      createdAt: ms(f.createdAt),
+      updatedAt: ms(f.updatedAt),
+    });
+    filesByWs.set(f.workspaceId, list);
+  }
+
+  const runsByWs = new Map<string, AgentRun[]>();
+  for (const { r } of wrRows) {
+    const list = runsByWs.get(r.workspaceId) ?? [];
+    list.push({
+      id: r.id,
+      goal: r.goal,
+      status: r.status as AgentRunStatus,
+      steps: (r.steps as AgentStep[] | null) ?? [],
+      model: r.model ?? undefined,
+      summary: r.summary ?? undefined,
+      error: r.error ?? undefined,
+      totalTokens: r.totalTokens ?? 0,
+      createdAt: ms(r.createdAt),
+      finishedAt: r.finishedAt ? ms(r.finishedAt) : undefined,
+    });
+    runsByWs.set(r.workspaceId, list);
+  }
+
   const workspaces: Record<string, Workspace> = {};
   for (const w of wsRows) {
     workspaces[w.id] = {
@@ -189,6 +258,11 @@ async function readUserState(
       name: w.name,
       model: w.model ?? undefined,
       createdAt: ms(w.createdAt),
+      files: filesByWs.get(w.id) ?? [],
+      runs: runsByWs.get(w.id) ?? [],
+      agent: (w.agent as WorkspaceAgentConfig | null) ?? {
+        ...DEFAULT_AGENT_CONFIG,
+      },
     };
   }
 
@@ -243,6 +317,9 @@ async function readUserState(
         defaultWorkspaceModel: sRow.defaultWorkspaceModel ?? undefined,
         username: sRow.username,
         tools: sRow.tools as ToolSettings,
+        contextManagement:
+          (sRow.contextManagement as Settings["contextManagement"]) ??
+          DEFAULT_CONTEXT_MANAGEMENT,
       }
     : defaultSettings(username);
 
@@ -343,20 +420,77 @@ export async function upsertWorkspace(
   userId: string,
   ws: Workspace
 ): Promise<void> {
-  await db
-    .insert(wsT)
-    .values({
-      id: ws.id,
-      userId,
-      name: ws.name,
-      model: ws.model ?? null,
-      createdAt: toDate(ws.createdAt),
-    })
-    .onConflictDoUpdate({
-      target: wsT.id,
-      set: { name: ws.name, model: ws.model ?? null },
-      setWhere: eq(wsT.userId, userId),
-    });
+  await db.transaction(async (tx) => {
+    await tx
+      .insert(wsT)
+      .values({
+        id: ws.id,
+        userId,
+        name: ws.name,
+        model: ws.model ?? null,
+        agent: ws.agent ?? null,
+        createdAt: toDate(ws.createdAt),
+      })
+      .onConflictDoUpdate({
+        target: wsT.id,
+        set: {
+          name: ws.name,
+          model: ws.model ?? null,
+          agent: ws.agent ?? null,
+        },
+        // Only update rows owned by this user.
+        setWhere: eq(wsT.userId, userId),
+      });
+
+    // Confirm ownership before touching child rows. If this id already belonged
+    // to another user, the guarded upsert above changed nothing and this read
+    // sees their id — abort so we never delete/replace someone else's files.
+    const owner = await tx
+      .select({ userId: wsT.userId })
+      .from(wsT)
+      .where(eq(wsT.id, ws.id))
+      .limit(1);
+    if (!owner[0] || owner[0].userId !== userId) {
+      throw new Error("Workspace not found or not owned by user.");
+    }
+
+    // Replace the filesystem set (client paths are the source of truth).
+    await tx.delete(wfT).where(eq(wfT.workspaceId, ws.id));
+    if (ws.files.length > 0) {
+      await tx.insert(wfT).values(
+        ws.files.map((f) => ({
+          id: `${ws.id}::${f.path}`,
+          workspaceId: ws.id,
+          path: f.path,
+          type: f.type,
+          content: f.content,
+          createdAt: toDate(f.createdAt),
+          updatedAt: toDate(f.updatedAt),
+        }))
+      );
+    }
+
+    // Replace the run set, re-seqing to array order.
+    await tx.delete(wrT).where(eq(wrT.workspaceId, ws.id));
+    if (ws.runs.length > 0) {
+      await tx.insert(wrT).values(
+        ws.runs.map((r, i) => ({
+          id: r.id,
+          workspaceId: ws.id,
+          seq: i,
+          goal: r.goal,
+          status: r.status,
+          model: r.model ?? null,
+          summary: r.summary ?? null,
+          error: r.error ?? null,
+          totalTokens: r.totalTokens ?? 0,
+          steps: r.steps ?? [],
+          createdAt: toDate(r.createdAt),
+          finishedAt: r.finishedAt ? toDate(r.finishedAt) : null,
+        }))
+      );
+    }
+  });
   await invalidateUserState(userId);
 }
 
@@ -366,6 +500,19 @@ export async function deleteWorkspace(
 ): Promise<void> {
   await db.delete(wsT).where(and(eq(wsT.userId, userId), eq(wsT.id, id)));
   await invalidateUserState(userId);
+}
+
+/** Whether a workspace exists and belongs to the given user. */
+export async function userOwnsWorkspace(
+  userId: string,
+  workspaceId: string
+): Promise<boolean> {
+  const rows = await db
+    .select({ id: wsT.id })
+    .from(wsT)
+    .where(and(eq(wsT.id, workspaceId), eq(wsT.userId, userId)))
+    .limit(1);
+  return rows.length > 0;
 }
 
 export async function upsertMemory(userId: string, mem: Memory): Promise<void> {
@@ -493,6 +640,7 @@ export async function saveSettings(
       defaultWorkspaceModel: settings.defaultWorkspaceModel ?? null,
       username: settings.username,
       tools: settings.tools,
+      contextManagement: settings.contextManagement,
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
@@ -504,6 +652,7 @@ export async function saveSettings(
         defaultWorkspaceModel: settings.defaultWorkspaceModel ?? null,
         username: settings.username,
         tools: settings.tools,
+        contextManagement: settings.contextManagement,
         updatedAt: new Date(),
       },
     });

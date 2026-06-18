@@ -245,3 +245,31 @@ export async function streamChat(
     toolCalls,
   };
 }
+
+/**
+ * A one-shot, non-streaming completion for "transient" helper calls — the brief
+ * model instances used to prune a verbose tool output or summarize old history.
+ * It reuses the streaming path (the proxy only streams) but discards the tokens
+ * and returns just the final text. No tools are advertised.
+ */
+export async function completeText(params: {
+  endpoint: string;
+  apiKey?: string;
+  model: string;
+  system?: string;
+  user: string;
+  signal?: AbortSignal;
+}): Promise<string> {
+  const result = await streamChat(
+    {
+      endpoint: params.endpoint,
+      apiKey: params.apiKey,
+      model: params.model,
+      system: params.system,
+      messages: [{ role: "user", content: params.user }],
+      signal: params.signal,
+    },
+    () => {}
+  );
+  return result.content.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+}

@@ -3,12 +3,15 @@
 import {
   Conversation,
   Memory,
+  SandboxStatus,
   Settings,
   Skill,
   SystemPrompt,
   UserStateSnapshot,
   UserUiState,
   Workspace,
+  WorkspaceExecResult,
+  WorkspaceFile,
 } from "./types";
 
 /**
@@ -21,12 +24,14 @@ import {
 async function req(
   method: string,
   url: string,
-  body?: unknown
+  body?: unknown,
+  signal?: AbortSignal
 ): Promise<unknown> {
   const res = await fetch(url, {
     method,
     headers: body ? { "Content-Type": "application/json" } : undefined,
     body: body ? JSON.stringify(body) : undefined,
+    signal,
   });
   if (!res.ok) {
     let detail = "";
@@ -60,6 +65,25 @@ export const api = {
     req("PUT", `/api/workspaces/${encodeURIComponent(w.id)}`, w),
   deleteWorkspace: (id: string) =>
     req("DELETE", `/api/workspaces/${encodeURIComponent(id)}`),
+  execWorkspaceCommand: (
+    id: string,
+    command: string,
+    files: WorkspaceFile[],
+    signal?: AbortSignal
+  ): Promise<{
+    result: WorkspaceExecResult;
+    files: WorkspaceFile[];
+  }> =>
+    req(
+      "POST",
+      `/api/workspaces/${encodeURIComponent(id)}/exec`,
+      { command, files },
+      signal
+    ) as Promise<{ result: WorkspaceExecResult; files: WorkspaceFile[] }>,
+  sandboxStatus: (id: string): Promise<SandboxStatus> =>
+    req("GET", `/api/workspaces/${encodeURIComponent(id)}/exec`) as Promise<SandboxStatus>,
+  resetWorkspaceSandbox: (id: string) =>
+    req("DELETE", `/api/workspaces/${encodeURIComponent(id)}/exec`),
 
   putMemory: (m: Memory) =>
     req("PUT", `/api/memories/${encodeURIComponent(m.id)}`, m),

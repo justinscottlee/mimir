@@ -23,9 +23,10 @@ import {
 
 const DEBOUNCE = {
   conversation: 700, // coalesce streaming patches
+  workspace: 700, // coalesce streaming agent steps + filesystem writes
   ui: 600, // coalesce drags/resizes
   settings: 500,
-  entity: 350, // memories / skills / system prompts / workspaces
+  entity: 350, // memories / skills / system prompts
 };
 
 interface Pending {
@@ -89,7 +90,7 @@ export function deleteConversationsBatch(ids: string[]) {
 /* ------------------------------- workspaces ----------------------------- */
 
 export function syncWorkspace(w: Workspace) {
-  schedule(`ws:${w.id}`, DEBOUNCE.entity, () => api.putWorkspace(w));
+  schedule(`ws:${w.id}`, DEBOUNCE.workspace, () => api.putWorkspace(w));
 }
 export function deleteWorkspace(id: string) {
   cancel(`ws:${id}`);

@@ -8,6 +8,27 @@
       "when": 1781477181927,
       "tag": "0000_black_lilith",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1781520646804,
+      "tag": "0001_workspace_agent",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781694568907,
+      "tag": "0002_system_prompt_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1781736919357,
+      "tag": "0003_drop_scope_add_context_mgmt",
+      "breakpoints": true
     }
   ]
 }

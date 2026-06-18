@@ -199,3 +199,43 @@ export const IconPencil = (p: IconProps) => (
         <path d="M10 3.33L12.67 6" />
     </Svg>
 );
+export const IconFolder = (p: IconProps) => (
+    <Svg {...p}>
+        <path d="M2 4.33C2 3.6 2.6 3 3.33 3H6L7.33 4.67H12.67C13.4 4.67 14 5.27 14 6V11.67C14 12.4 13.4 13 12.67 13H3.33C2.6 13 2 12.4 2 11.67V4.33Z" />
+    </Svg>
+);
+export const IconFolderOpen = (p: IconProps) => (
+    <Svg {...p}>
+        <path d="M2 5.33C2 4.6 2.6 4 3.33 4H6L7.33 5.67H12C12.73 5.67 13.33 6.27 13.33 7H4.67C4.07 7 3.55 7.4 3.4 7.97L2 13V5.33Z" />
+        <path d="M3.4 7.97C3.55 7.4 4.07 7 4.67 7H14L12.6 12.03C12.45 12.6 11.93 13 11.33 13H2L3.4 7.97Z" />
+    </Svg>
+);
+export const IconFile = (p: IconProps) => (
+    <Svg {...p}>
+        <path d="M4 1.67h5L12.67 5.33V13.33C12.67 13.7 12.37 14 12 14H4C3.63 14 3.33 13.7 3.33 13.33V2.33C3.33 1.97 3.63 1.67 4 1.67Z" />
+        <path d="M8.67 1.67V5.33H12.67" />
+    </Svg>
+);
+export const IconTerminal = (p: IconProps) => (
+    <Svg {...p}>
+        <rect x="1.67" y="2.67" width="12.67" height="10.67" rx="1.33" />
+        <path d="M4.33 6L6.33 8L4.33 10M8 10H11.33" />
+    </Svg>
+);
+export const IconPlay = (p: IconProps) => (
+    <Svg {...p}>
+        <path d="M4 2.67L13 8L4 13.33V2.67Z" fill="currentColor" stroke="none" />
+    </Svg>
+);
+export const IconDownload = (p: IconProps) => (
+    <Svg {...p}>
+        <path d="M8 2V10.67M8 10.67L4.67 7.33M8 10.67L11.33 7.33M2.67 13.33H13.33" />
+    </Svg>
+);
+export const IconSliders = (p: IconProps) => (
+    <Svg {...p}>
+        <path d="M2.67 4.67H10M12.67 4.67H13.33M2.67 11.33H6M8.67 11.33H13.33" />
+        <circle cx="11" cy="4.67" r="1.33" />
+        <circle cx="7" cy="11.33" r="1.33" />
+    </Svg>
+);

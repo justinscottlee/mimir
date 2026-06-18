@@ -2,6 +2,39 @@ import { ToolHandler } from "./tools";
 import { WebFetchConfig, WebSearchConfig } from "./types";
 
 /**
+ * Global web-search throttle. Searches are serialized through a single promise
+ * chain and spaced at least `minMs` apart, across every conversation and agent,
+ * so a self-hosted search engine is less likely to rate-limit or captcha-block
+ * you. The state is module-level on purpose: it must span all callers.
+ */
+let searchLock: Promise<void> = Promise.resolve();
+let nextSearchAllowedAt = 0;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Waits for this search's turn given the configured minimum interval. Chaining
+ * off `searchLock` serializes concurrent callers so each gets its own slot,
+ * spaced `minMs` apart, rather than all firing at once.
+ */
+async function awaitSearchSlot(minMs: number): Promise<void> {
+  if (!minMs || minMs <= 0) return;
+  const mine = searchLock.then(async () => {
+    const now = Date.now();
+    const start = Math.max(now, nextSearchAllowedAt);
+    nextSearchAllowedAt = start + minMs;
+    const wait = start - now;
+    if (wait > 0) await sleep(wait);
+  });
+  // Swallow errors on the shared chain so one failure can't wedge the gate.
+  searchLock = mine.catch(() => {});
+  await mine;
+}
+
+
+/**
  * The two web tools that give the model reach beyond its training data:
  *
  *   web_search — turns a query into ranked results (title/url/snippet) from a
@@ -93,6 +126,10 @@ export function webSearchTool(config: WebSearchConfig): ToolHandler {
       if (!query) return "Error: a non-empty 'query' is required.";
       const timeRange =
         typeof args.time_range === "string" ? args.time_range : undefined;
+
+      // Throttle: hold here until this search's spaced-out slot, so we don't
+      // hammer the search engine into rate-limiting or captcha-blocking us.
+      await awaitSearchSlot(config.throttleMs ?? 0);
 
       const res = await fetch("/api/websearch", {
         method: "POST",
