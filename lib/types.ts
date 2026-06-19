@@ -11,13 +11,13 @@ export interface Tab {
 
 /** Library and manager pages open as floating windows instead of tabs. */
 export type WindowKind =
-  | "conversations"
-  | "workspaces"
+  | "library"
   | "memories"
   | "skills"
   | "tools"
   | "systemPrompt"
-  | "settings";
+  | "settings"
+  | "usage";
 
 export interface FloatingWindow {
   id: string;
@@ -104,6 +104,15 @@ export interface Conversation {
    * web access is enabled elsewhere.
    */
   webToolsEnabled?: boolean;
+  /**
+   * Organization metadata (shared with workspaces, since the Library window
+   * lists both together). `folderId` points at a Folder in Settings, or is
+   * absent for the top level. `tagIds` references Tags in Settings. `pinned`
+   * floats the item to the top of its folder.
+   */
+  folderId?: string;
+  tagIds?: string[];
+  pinned?: boolean;
 }
 
 /* ============================================================================
@@ -125,8 +134,20 @@ export interface WorkspaceFile {
   path: string;
   /** Whether this node is a regular file or a directory. */
   type: "file" | "dir";
-  /** File contents. Always "" for directories. */
+  /**
+   * File contents. Always "" for directories. For a `utf8` file (the default
+   * and overwhelmingly common case) this is the literal text. For a `base64`
+   * file this is the base64-encoded bytes — that's how genuinely binary
+   * artifacts (images, PDFs, archives, compiled output, uploaded zips) survive
+   * a round trip through the store, the sandbox sync, and zip download.
+   */
   content: string;
+  /**
+   * How `content` is encoded. Absent or "utf8" means plain text; "base64" means
+   * `content` holds base64-encoded binary bytes. Kept optional so every
+   * existing text node stays valid without a migration.
+   */
+  encoding?: "utf8" | "base64";
   createdAt: number;
   updatedAt: number;
 }
@@ -145,6 +166,13 @@ export interface WorkspaceAgentConfig {
    * agent is — planning and verifying. Defaults to "standard".
    */
   persona?: AgentPersonaKey;
+  /**
+   * Optional per-workspace override of the sandbox network mode ("none" =
+   * isolated, "bridge" = internet for installs). Inherits the server-wide
+   * `SANDBOX_NETWORK` when undefined. The toolchain image is always the
+   * server-configured default (`SANDBOX_IMAGE`) — not per-workspace.
+   */
+  sandboxNetwork?: "none" | "bridge";
 }
 
 /** Identifies one of the built-in agent personas in agentPrompts.ts. */
@@ -262,6 +290,10 @@ export interface Workspace {
   runs: AgentRun[];
   /** Agent loop limits and standing instructions. */
   agent: WorkspaceAgentConfig;
+  /** Organization metadata, shared with conversations (see Conversation). */
+  folderId?: string;
+  tagIds?: string[];
+  pinned?: boolean;
 }
 
 /** The outcome of running one command in a workspace's execution sandbox. */
@@ -336,15 +368,16 @@ export function parseModelKey(key: string): ModelRef | null {
 
 /**
  * Configuration for the web_search tool. Search runs against a self-hosted
- * SearXNG instance: the model emits a query, Mimir forwards it to SearXNG's
- * JSON API, and the ranked results come back. Nothing about your prompt leaves
- * the machine except the search query you can see in the tool chip.
+ * SearXNG instance configured *by the server* (the `SEARXNG_URL` env var), not
+ * by the browser — so there's no per-user URL to get wrong and a query can only
+ * ever go to the instance the operator chose. The model emits a query, Mimir
+ * forwards it server-side to SearXNG's JSON API, and the ranked results come
+ * back. Nothing about your prompt leaves the machine except the search query
+ * you can see in the tool chip.
  */
 export interface WebSearchConfig {
   /** Master switch — when false the tool is never advertised to the model. */
   enabled: boolean;
-  /** Base URL of the SearXNG instance, e.g. http://localhost:8888 */
-  searxngUrl: string;
   /** How many results to hand back to the model (1–10). */
   maxResults: number;
   /** SearXNG safe-search level: 0 off, 1 moderate, 2 strict. */
@@ -375,6 +408,77 @@ export interface BuiltinToolToggles {
   loadSkill: boolean;
 }
 
+/**
+ * A user-defined folder for organizing the Library (conversations AND
+ * workspaces live in the same window now, so a folder can hold either kind).
+ * Folders are flat for now — an item's `folderId` points at one of these, or is
+ * absent for the top level. Definitions live in Settings (low-volume metadata),
+ * while membership lives on each conversation/workspace via `folderId`.
+ */
+export interface Folder {
+  id: string;
+  name: string;
+  /** Optional accent color key (see TAG_COLORS) for the folder's icon. */
+  color?: TagColor;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * A color-coded label assignable to conversations and workspaces. Membership is
+ * on each item via `tagIds`; the definitions (label + color) live here so a tag
+ * can be renamed/recolored in one place.
+ */
+export interface Tag {
+  id: string;
+  label: string;
+  color: TagColor;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** The fixed palette tags and folders pick from (keeps the UI coherent). */
+export type TagColor =
+  | "bronze"
+  | "blue"
+  | "green"
+  | "red"
+  | "purple"
+  | "amber"
+  | "teal"
+  | "pink"
+  | "slate";
+
+export const TAG_COLORS: TagColor[] = [
+  "bronze",
+  "blue",
+  "green",
+  "red",
+  "purple",
+  "amber",
+  "teal",
+  "pink",
+  "slate",
+];
+
+/**
+ * Per-model token pricing for the usage/cost view. Keyed by either a fully
+ * qualified model key (`endpointId::modelId`) or a bare `modelId` (so one price
+ * can cover the same hosted model across endpoints). Prices are per **one
+ * million** tokens, the unit hosted providers quote, in US dollars.
+ */
+export interface ModelPrice {
+  /** Cost per 1M input (prompt) tokens. */
+  inputPerMTok: number;
+  /** Cost per 1M output (completion) tokens. */
+  outputPerMTok: number;
+}
+
+export interface UsagePricing {
+  /** Map of model key (or bare model id) → price. */
+  models: Record<string, ModelPrice>;
+}
+
 /** All tool configuration, surfaced in the Tools window. */
 export interface ToolSettings {
   webSearch: WebSearchConfig;
@@ -396,6 +500,27 @@ export interface Settings {
   tools: ToolSettings;
   /** Active context-window management (tool-output pruning + summarization). */
   contextManagement: ContextManagementSettings;
+  /** Folder definitions for the Library window (membership lives on items). */
+  folders: Folder[];
+  /** Color-coded tag definitions (membership lives on items via tagIds). */
+  tags: Tag[];
+  /** Per-model token pricing for the usage/cost view. */
+  pricing: UsagePricing;
+}
+
+/**
+ * Fixed, internal caps on tool output size, applied so a single tool result
+ * can't pour an unbounded amount of text into the model's context. These are
+ * not user-tunable — they live as a constant (DEFAULT_TOOL_OUTPUT_LIMITS) and
+ * are passed straight to the workspace agent's tools. The sandbox's own
+ * server-side stdout cap (SANDBOX_MAX_OUTPUT_KB) is a separate hard limit
+ * applied before this.
+ */
+export interface ToolOutputLimits {
+  /** Max characters returned by read_file before truncation. */
+  readFileChars: number;
+  /** Max characters of a command's combined output kept in the tool result. */
+  commandOutputChars: number;
 }
 
 /**
@@ -432,7 +557,7 @@ export interface ContextManagementSettings {
  * A durable fact the model can recall across conversations. Memories are
  * surfaced to the model two ways: every "always" memory is injected into the
  * system prompt, and the model can write new ones via a tool call (see
- * lib/memoryTool.ts). Stored locally alongside everything else.
+ * lib/memory.ts). Persisted per-account in PostgreSQL alongside everything else.
  */
 export interface Memory {
   id: string;

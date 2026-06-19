@@ -88,9 +88,12 @@ Linux sandbox to write code, run it, read the errors, and fix them).
   sessions and agent runs stay within a bounded context window.
 - **Agentic workspaces.** Give a model a sandboxed virtual filesystem and a
   real Docker container, and it will plan → write → **run** → observe → fix
-  across many steps, keeping a live checklist you can edit mid-run. Includes an
-  interactive terminal, a file editor with live HTML/Markdown/SVG preview, and
-  one-click "download as zip."
+  across many steps, keeping a live checklist you can edit mid-run. Includes a
+  genuinely interactive terminal (a real TTY); a file tree with drag-and-drop
+  file/zip upload *and* drag-to-move (drop a node onto a folder to file it); a
+  file editor with live HTML/Markdown/SVG preview (and image preview for binary
+  files); a per-workspace sandbox network toggle; and one-click "download as
+  zip." Agents can optionally search and fetch the web mid-run.
 - **Multi-user & self-hosted.** Email + password accounts (Better Auth), every
   row scoped to its owner, a one-flag switch to lock down sign-ups. Everything
   persists to PostgreSQL, cached in Valkey.
@@ -134,21 +137,30 @@ Mimir is a single, client-rendered page (`components/AppShell.tsx`) that sits
 behind a sign-in gate (`components/AuthGate.tsx`).
 
 - **Left sidebar.** New conversation, New workspace, Search (⌘K), then your
-  **Library** (Conversations, Workspaces) and **Tools** (Memories, Skills, Tools,
-  System Prompt), with a profile footer that opens Settings.
+  **Library** (one window listing chats *and* workspaces together) and **Tools**
+  (Memories, Skills, Tools, System Prompt, Usage & cost), with a profile footer
+  that opens Settings.
 - **Tabs.** The top strip is reserved for the things you actively work in — chats
   and workspaces. Drag to reorder, click the active tab's title to rename it (it
   renames the underlying conversation/workspace too), and right-click for a
   context menu (rename, close, close others, close to the right, delete). A `+`
-  at the end opens a small menu to start a new conversation or workspace.
-- **Floating windows.** Manager pages (Conversations, Workspaces, Memories,
-  Skills, Tools, System Prompt, Settings) open as draggable, resizable windows —
-  one per kind, clamped to the viewport so they can't be lost off-screen, with
-  positions and sizes that persist across refreshes (and across devices, since
-  the layout is saved server-side).
-- **Global search (⌘K)** and the Conversations window both search titles *and*
-  message content. The Conversations window also has a multi-select mode for
-  deleting several conversations behind one confirmation.
+  at the end opens a small menu to start a new conversation or workspace. Closing
+  a tab whose conversation or workspace was never touched (no messages, no
+  files/runs) discards it, so a quick "new tab" you didn't use doesn't pile up in
+  the Library.
+- **The Library.** Chats and workspaces live in one window, each row badged by
+  type. Organize them into **folders** and label them with **color-coded tags**
+  (both fully user-defined), pin the important ones to the top, and filter by
+  folder, tag, type, or a text search across titles *and* contents. A per-item
+  menu handles open, rename, pin, tagging, moving between folders, and delete.
+- **Floating windows.** Manager pages (Library, Memories, Skills, Tools, System
+  Prompt, Usage & cost, Settings) open as draggable, resizable windows — one per
+  kind, clamped to the viewport so they can't be lost off-screen, with positions
+  and sizes that persist across refreshes (and across devices, since the layout
+  is saved server-side).
+- **Usage & cost.** A dedicated window totals token usage across every chat and
+  agent run, grouped by model, and — for models you give a price (input/output
+  per million tokens, in US dollars) — estimates spend.
 
 ### Responsive / mobile
 
@@ -463,34 +475,49 @@ command under strict limits, and returns its stdout/stderr plus the post-run
 filesystem — so anything the command creates appears straight back in the editor.
 The virtual filesystem stays the source of truth; only changed files are pushed in,
 heavy/generated directories (`node_modules`, `.git`, `__pycache__`, `dist`, …) are
-never synced back, and binary or oversized files are skipped. **One container is
-kept alive per workspace** so state persists across commands within a session
-(installed packages, build artifacts), with an idle reaper stopping unused ones.
-Because each `exec` is a fresh process, the working directory is tracked and
-re-applied around every command, so `cd` actually persists.
+never synced back, and oversized files (beyond the sync caps) are skipped. **Binary
+files round-trip** — images, archives, and compiled output are kept as base64, so a
+command that produces a PNG or a zip shows up in the explorer and downloads
+byte-for-byte. **One container is kept alive per workspace** so state persists across
+commands within a session (installed packages, build artifacts), with an idle reaper
+stopping unused ones. Because each `exec` is a fresh process, the working directory is
+tracked and re-applied around every command, so `cd` actually persists. Web access is
+**opt-in per agent**: when the web tools are enabled (Tools window), an agent can
+`web_search` and `web_fetch` mid-run to look things up while it works.
 
 **The workbench.** A file explorer (create, edit, download, delete, zip a
-subtree); a center pane that switches between the **Agent** transcript, an
+subtree, **upload files/folders or drag-and-drop a `.zip`** that's expanded into
+the tree, and **drag a node onto a folder — or onto empty space — to move it**);
+a center pane that switches between the **Agent** transcript, an
 interactive **Terminal**, and a **file editor**; an **Agents** view; and a goal
 composer. The transcript renders thinking, prose, and tool chips per step just
 like the chat (a **Log** view shows the same run as a compact action list). The
-**terminal** is a real console into the same container the agent uses — type `ls`,
-`python main.py`, `pip install …`, see the output, and watch new files appear in
-the explorer. The **file editor** includes a live preview for HTML, Markdown, and
-SVG files; for HTML it inlines local stylesheets, scripts, and image assets so a
-multi-file page renders with no server. Runs stream live into the store, so the
-explorer, editor, and transcript all update as the agent works; files and runs
-persist to Postgres (`workspace_files`, `workspace_runs`).
+**terminal** is a genuinely interactive shell into the same container the agent
+uses — it's a real TTY, so prompts, REPLs (`python`, `node`), colored output,
+progress bars, and Ctrl-C all work; type `ls`, `python main.py`, `pip install …`,
+and watch new files appear in the explorer. Output streams over Server-Sent
+Events and keystrokes are sent as you type; a small built-in ANSI model renders
+it (no xterm dependency). The **file editor** includes a live preview for HTML,
+Markdown, and SVG files (for HTML it inlines local stylesheets, scripts, and
+image assets so a multi-file page renders with no server) and shows an image
+preview or a size summary for binary files. Runs stream live into the store, so
+the explorer, editor, and transcript all update as the agent works; files and
+runs persist to Postgres (`workspace_files`, `workspace_runs`).
 
 **Download.** Export the whole workspace — or any subtree from the explorer's
 context menu — as a `.zip`, built entirely in the browser (no dependency; uses the
 platform `CompressionStream` when available).
 
-**Hardening.** Containers run with **no network by default** (set
-`SANDBOX_NETWORK=bridge` to allow `pip`/`npm`), all Linux capabilities dropped,
+**Hardening.** Containers run with all Linux capabilities dropped,
 `no-new-privileges`, and CPU / memory / pid / wall-clock limits, plus caps on what
-gets synced back into the editor. This runs **model-written code on your host**, so
-the isolation is best-effort, not a guarantee — see the
+gets synced back into the editor. The bundled compose gives executed code internet
+access by default (`SANDBOX_NETWORK=bridge`, so `pip`/`npm`/`cargo` work); set
+`SANDBOX_NETWORK=none` to cut it off for stricter isolation. Each workspace can
+also **toggle its sandbox network** in its agent settings. The toolchain image is
+always the server-configured one (`SANDBOX_IMAGE`) — it is **not** selectable
+per workspace, since an arbitrary user-chosen image is both a footgun and a
+larger attack surface. This runs **model-written code on your host**, so the
+isolation is best-effort, not a guarantee — see the
 [security model](#security-model--caveats) and the `SANDBOX_*` knobs in the
 [configuration reference](#configuration-reference).
 
@@ -594,6 +621,12 @@ Notes for this mode:
 - **SearXNG (web search)** works out of the box — compose sets `SEARXNG_URL` to the
   internal service, so there's nothing to configure. (Flip the web-search toggle on
   in the Tools window to actually offer it to the model.)
+- **Sandbox toolchain image.** Compose builds a `sandbox-image` service into
+  `mimir-sandbox:latest` (gcc/g++, Python, Node, Go, Rust, git, jq, ripgrep, …)
+  and waits for it before starting the app, so workspaces have a rich toolchain
+  by default. The first build is a larger pull; rebuild it with
+  `docker compose build sandbox-image`. Every workspace uses this image; a
+  workspace can toggle its sandbox network in its agent settings.
 - **A llama.cpp server on the host** is reachable as
   `http://host.docker.internal:<port>` from Settings (compose maps that name to your
   host). A LAN address like `http://192.168.1.50:8080` works as-is.
@@ -649,7 +682,7 @@ All variables are optional except `BETTER_AUTH_SECRET`. The bundled
 
 | Variable             | Purpose                                                                    | Default                 |
 | -------------------- | -------------------------------------------------------------------------- | ----------------------- |
-| `BETTER_AUTH_SECRET` | **Set this.** Signing secret for sessions — `openssl rand -base64 32`      | _none_                  |
+| `BETTER_AUTH_SECRET` | Signing secret for sessions. If unset, the entrypoint generates a strong random one and persists it to `.auth-secret` so sessions stay stable; set it explicitly (`openssl rand -base64 32`) to control it yourself. | _auto-generated_        |
 | `BETTER_AUTH_URL`    | Public base URL of the app (cookies, callbacks)                            | `http://localhost:3000` |
 | `ALLOW_SIGNUP`       | `false` disables new registrations (existing accounts can still sign in)   | `true`                  |
 
@@ -673,13 +706,13 @@ Requires a reachable Docker daemon.
 | Variable                | Purpose                                                                                  | Default            |
 | ----------------------- | ---------------------------------------------------------------------------------------- | ------------------ |
 | `SANDBOX_ENABLED`       | Master switch for code execution (`false` turns it off; the feature is on otherwise)     | `true`             |
-| `SANDBOX_IMAGE`         | Image commands run in. Needs coreutils `timeout` + `sh`. Swap for richer toolchains.     | `python:3.12-slim` |
-| `SANDBOX_NETWORK`       | `none` = no internet for code (hardened). `bridge` allows `pip`/`npm`, at isolation cost.| `none` (code) / `bridge` (shipped example) |
+| `SANDBOX_IMAGE`         | Image commands run in. The bundled compose builds and uses `mimir-sandbox:latest` (gcc/g++, Python, Node, Go, Rust, git, …); the code default below is the minimal fallback. Used by every workspace (not per-workspace). | `python:3.12-slim` |
+| `SANDBOX_NETWORK`       | `bridge` = internet for code (so `pip`/`npm`/`cargo` work). `none` = no network, for stricter isolation. Overridable per workspace. | `bridge`           |
 | `SANDBOX_MEMORY_MB`     | Memory cap per container                                                                 | `512`              |
 | `SANDBOX_CPUS`          | CPU cap (cores; fractional allowed)                                                      | `1`                |
 | `SANDBOX_PIDS`          | Max processes                                                                            | `256`              |
-| `SANDBOX_TIMEOUT_MS`    | Per-command wall-clock limit                                                             | `30000`            |
-| `SANDBOX_IDLE_MS`       | Stop a container after this much idle time                                               | `600000`           |
+| `SANDBOX_TIMEOUT_MS`    | Per-command wall-clock limit (one-shot `run_command`; the interactive terminal isn't time-limited) | `30000`            |
+| `SANDBOX_IDLE_MS`       | Stop a container (and idle terminals) after this much idle time                          | `600000`           |
 | `SANDBOX_READONLY_ROOT` | `true` hardens further but breaks system `pip`                                           | `false`            |
 | `SANDBOX_USER`          | Run as a specific `uid:gid` (default: the image's user)                                  | _image default_    |
 | `SANDBOX_MAX_FILE_KB`   | Skip syncing files larger than this back into the editor                                 | `256`              |
@@ -709,8 +742,9 @@ your account:
 - **Tools window** — master on/off for every tool, web-search/fetch parameters, and
   context management (pruning + summarization). See
   [Tools](#tools--the-tool-loop) and [Context management](#context-management).
-- **Agent settings (per workspace)** — persona, max steps, output-token budget, and
-  standing instructions, set from the popover in the workspace header.
+- **Agent settings (per workspace)** — persona, max steps, output-token budget,
+  sandbox network, and standing instructions, set from the popover in the
+  workspace header.
 
 ---
 
@@ -779,18 +813,20 @@ components/
   TabBar, Sidebar,     Chrome: tabs, sidebar, floating windows, search overlay
   FloatingWindow, …
   Markdown.tsx         GFM rendering + syntax highlighting
-  views/               Manager pages (Chat, Conversations, Memories, Skills,
-                       Settings, SystemPrompt, Tools, Workspaces) …
+  views/               Manager pages (Chat, Library, Usage, Memories, Skills,
+                       Settings, SystemPrompt, Tools) …
   views/workspace/     …and the workspace workbench (FileExplorer, FileEditor,
                        Terminal, AgentPanel, PlanView, AgentSettings, …)
 lib/
   store.ts             Zustand optimistic store (the client's source of truth)
+  store-slices/        Per-domain store slices composed into store.ts
+                       (organizationSlice: folders, tags, item membership, pricing)
   sync.ts              Debounced background persistence to /api/*
   types.ts             The data model (source of truth for the jsonb shapes)
   defaults.ts          Pure defaults + seed helpers (shared client/server)
   llama.ts             Streaming chat client + SSE/reasoning parsing
   models.ts            Endpoint/model resolution and pickers
-  tools.ts             The tool registry + chat tool loop
+  tools.ts             The tool registry + chat tool loop (+ shared tool helpers)
   memory.ts            remember tool + memory injection prompt
   skills.ts            SKILL.md parser + load_skill tool + discovery prompt
   systemPrompts.ts     System-prompt presets + segment assembly
@@ -815,25 +851,25 @@ These are known boundaries, not bugs. Several are tracked as roadmap items in
 
 - **Generation runs in the browser.** Closing the tab stops an in-flight chat
   response or agent run — there's no server-side run executor yet.
-- **The terminal is a command runner, not a live TTY.** Each command runs to
-  completion under a time limit; no interactive prompts, REPLs, or long-lived
-  servers, and no streaming stdin.
-- **The workspace filesystem is text-only.** Files a command produces that are
-  binary (or larger than the sync caps) aren't mirrored back into the editor.
+- **The interactive terminal is a pragmatic emulator, not full xterm.** It's a
+  real TTY (prompts, REPLs, colors, Ctrl-C, streaming all work), rendered by a
+  lightweight built-in ANSI model. Elaborate full-screen TUIs (vim, htop) that
+  lean on the alternate screen and complex cursor addressing degrade gracefully
+  rather than render perfectly.
 - **Skill scripts don't auto-run in chat.** `load_skill` surfaces a skill's
   scripts but the chat tool loop won't execute them — you can run them yourself in
   a workspace, which has a real execution sandbox.
-- **Workspace agents have no web access.** An agent's tools are filesystem, shell,
-  and planning — it can't currently `web_search` or `web_fetch` mid-run.
 
 ---
 
 ## Roadmap
 
 Planned features, fixes, and refactors are tracked in **[`TODO.md`](TODO.md)** —
-including server-side run execution (so generation survives a tab close), richer
-sandbox toolchains, uploading existing projects into a workspace, per-conversation
-and per-request generation parameters, web access for agents, and more.
+including server-side run execution (so generation survives a tab close),
+per-conversation and per-request generation parameters, and more. (Several
+earlier limitations — a real interactive terminal, binary files in the
+workspace, web access for agents, richer sandbox toolchains, and uploading
+existing projects — are now implemented.)
 
 ---
 

@@ -773,9 +773,12 @@ function ChatInput({
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    const maxPx = 288; // matches max-h-72
     el.style.height = "auto";
-    const next = el.scrollHeight;
+    const full = el.scrollHeight;
+    const next = Math.min(full, maxPx);
     el.style.height = `${next}px`;
+    el.style.overflowY = full > maxPx ? "auto" : "hidden";
     if (next !== lastHeight.current) {
       lastHeight.current = next;
       onResize();
@@ -813,7 +816,7 @@ function ChatInput({
             }}
             rows={1}
             placeholder="Message the model…"
-            className="max-h-72 min-h-[2.5rem] flex-1 resize-none bg-transparent px-1 py-2 text-base leading-relaxed text-parchment-100 placeholder:text-parchment-600 focus:outline-none md:text-sm"
+            className="max-h-72 min-h-[2.5rem] flex-1 resize-none overflow-hidden bg-transparent px-1 py-2 text-base leading-relaxed text-parchment-100 placeholder:text-parchment-600 focus:outline-none md:text-sm"
           />
           {streaming ? (
             <button

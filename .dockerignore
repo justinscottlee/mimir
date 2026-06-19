@@ -9,9 +9,9 @@ node_modules
 .local
 .config
 *.log
-mmm.zip
 *.zip
 tsconfig.tsbuildinfo
+.auth-secret
 .env
 .env.local
 .DS_Store

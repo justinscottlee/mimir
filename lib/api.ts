@@ -85,6 +85,44 @@ export const api = {
   resetWorkspaceSandbox: (id: string) =>
     req("DELETE", `/api/workspaces/${encodeURIComponent(id)}/exec`),
 
+  // Interactive terminal (PTY). The output stream itself is consumed via
+  // EventSource against the same path with ?ptyId=… (see Terminal.tsx).
+  openPty: (
+    id: string,
+    files: WorkspaceFile[],
+    cols: number,
+    rows: number
+  ): Promise<{ ptyId: string }> =>
+    req("POST", `/api/workspaces/${encodeURIComponent(id)}/pty`, {
+      action: "open",
+      files,
+      cols,
+      rows,
+    }) as Promise<{ ptyId: string }>,
+  ptyInput: (id: string, ptyId: string, data: string) =>
+    req("POST", `/api/workspaces/${encodeURIComponent(id)}/pty`, {
+      action: "input",
+      ptyId,
+      data,
+    }),
+  ptyResize: (id: string, ptyId: string, cols: number, rows: number) =>
+    req("POST", `/api/workspaces/${encodeURIComponent(id)}/pty`, {
+      action: "resize",
+      ptyId,
+      cols,
+      rows,
+    }),
+  closePty: (
+    id: string,
+    ptyId: string,
+    files: WorkspaceFile[]
+  ): Promise<{ files: WorkspaceFile[]; skipped?: string[] }> =>
+    req("POST", `/api/workspaces/${encodeURIComponent(id)}/pty`, {
+      action: "close",
+      ptyId,
+      files,
+    }) as Promise<{ files: WorkspaceFile[]; skipped?: string[] }>,
+
   putMemory: (m: Memory) =>
     req("PUT", `/api/memories/${encodeURIComponent(m.id)}`, m),
   deleteMemory: (id: string) =>

@@ -1,5 +1,6 @@
 import { WorkspaceFile } from "../types";
 import { ToolHandler, ToolRegistry } from "../tools";
+import { DEFAULT_TOOL_OUTPUT_LIMITS } from "../defaults";
 import * as fs from "./fs";
 
 /**
@@ -20,9 +21,6 @@ export interface WorkspaceFsApi {
   getFiles: () => WorkspaceFile[];
   setFiles: (files: WorkspaceFile[]) => void;
 }
-
-/** Cap on characters returned by read_file so a huge file can't blow context. */
-const READ_CHAR_CAP = 40000;
 
 function listFilesTool(api: WorkspaceFsApi): ToolHandler {
   return {
@@ -63,7 +61,7 @@ function listFilesTool(api: WorkspaceFsApi): ToolHandler {
   };
 }
 
-function readFileTool(api: WorkspaceFsApi): ToolHandler {
+function readFileTool(api: WorkspaceFsApi, readCharCap: number): ToolHandler {
   return {
     def: {
       type: "function",
@@ -99,6 +97,13 @@ function readFileTool(api: WorkspaceFsApi): ToolHandler {
       if (node.type === "dir") {
         return `Error: "${node.path}" is a directory. Use list_files to see its contents.`;
       }
+      // Binary files are stored base64; surfacing that to the model is useless
+      // (and huge). Report it instead of dumping the encoded bytes.
+      if (fs.isBinary(node)) {
+        return `"${node.path}" is a binary file (${fs.nodeSize(
+          node
+        )}); its contents aren't text and can't be shown.`;
+      }
       const total = fs.lineCount(node.content);
       const start = numArg(args.start_line);
       const end = numArg(args.end_line);
@@ -114,8 +119,8 @@ function readFileTool(api: WorkspaceFsApi): ToolHandler {
       }
 
       let truncated = "";
-      if (body.length > READ_CHAR_CAP) {
-        body = body.slice(0, READ_CHAR_CAP);
+      if (body.length > readCharCap) {
+        body = body.slice(0, readCharCap);
         truncated =
           "\n\n…(truncated — read a line range to see the rest rather than guessing it)";
       }
@@ -314,10 +319,13 @@ export const FILESYSTEM_TOOL_NAMES = [
 ] as const;
 
 /** Builds the complete filesystem tool registry bound to a store-backed API. */
-export function buildFilesystemTools(api: WorkspaceFsApi): ToolRegistry {
+export function buildFilesystemTools(
+  api: WorkspaceFsApi,
+  readCharCap: number = DEFAULT_TOOL_OUTPUT_LIMITS.readFileChars
+): ToolRegistry {
   return {
     list_files: listFilesTool(api),
-    read_file: readFileTool(api),
+    read_file: readFileTool(api, readCharCap),
     write_file: writeFileTool(api),
     edit_file: editFileTool(api),
     make_dir: makeDirTool(api),

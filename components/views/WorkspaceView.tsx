@@ -27,8 +27,8 @@ type MobilePane = "files" | "main" | "agents";
  * in the center, and an agent composer at the bottom. The composer either starts
  * a new lead agent or continues (re-prompts) the selected one, so an agent is a
  * durable, resumable conversation rather than a throwaway. All run execution is
- * delegated to the workspace runner hook, which streams steps, plan updates, and
- * sub-agent activity straight into the store.
+ * delegated to the workspace runner hook, which streams steps and plan updates
+ * straight into the store.
  */
 export default function WorkspaceView({
   workspaceId,
@@ -59,7 +59,7 @@ export default function WorkspaceView({
     [loads, settings.disabledModels]
   );
 
-  // All runs are top-level agents (sub-agents were removed), and the focused run.
+  // Every run is a top-level agent; the focused one drives the transcript.
   const leadRuns = useMemo(
     () => workspace?.runs ?? [],
     [workspace?.runs]
@@ -83,11 +83,16 @@ export default function WorkspaceView({
   }, [liveByStatus, activeRun?.id, runner]);
 
   // Grow the composer with its content, like the conversation composer does.
+  // Only reveal a scrollbar once it hits the max height and actually overflows
+  // — otherwise the textarea shows an idle scrollbar at rest.
   useEffect(() => {
     const el = promptRef.current;
     if (!el) return;
+    const maxPx = 160; // matches max-h-40
     el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
+    const full = el.scrollHeight;
+    el.style.height = `${Math.min(full, maxPx)}px`;
+    el.style.overflowY = full > maxPx ? "auto" : "hidden";
   }, [prompt]);
 
   const endpointsKey = settings.endpoints.map((e) => e.id + e.url).join("|");
@@ -315,8 +320,8 @@ export default function WorkspaceView({
           </div>
         )}
 
-        {/* Right sidebar: plan (top) + agent/sub-agent hierarchy (bottom). The
-            sole means of navigating between agents and sub-agents. */}
+        {/* Right sidebar: plan (top) + the run list (bottom), used to switch
+            between this workspace's agent runs. */}
         {(!isMobile || mobilePane === "agents") && (
           <div
             className={[
@@ -381,7 +386,7 @@ export default function WorkspaceView({
                 : "Describe a task for a new agent — e.g. “Create a Python script that prints the first 20 primes, then a README explaining it.”"
             }
             spellCheck={false}
-            className="max-h-40 min-h-[2.5rem] flex-1 resize-none rounded-lg border border-ink-700 bg-ink-850 px-3 py-2 text-sm leading-relaxed text-parchment-100 placeholder:text-parchment-600/70 focus:border-bronze-600 focus:outline-none disabled:opacity-60"
+            className="max-h-40 min-h-[2.5rem] flex-1 resize-none overflow-hidden rounded-lg border border-ink-700 bg-ink-850 px-3 py-2 text-sm leading-relaxed text-parchment-100 placeholder:text-parchment-600/70 focus:border-bronze-600 focus:outline-none disabled:opacity-60"
           />
           {running ? (
             <button

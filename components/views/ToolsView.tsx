@@ -62,15 +62,13 @@ export default function ToolsView() {
         onToggle={(v) => update({ webSearch: { enabled: v } })}
         description="Turns a query into ranked results from your self-hosted SearXNG instance. Only the search query leaves the machine, and it's shown in the tool chip."
       >
-        <Field label="SearXNG URL">
-          <input
-            value={tools.webSearch.searxngUrl}
-            onChange={(e) => update({ webSearch: { searxngUrl: e.target.value } })}
-            placeholder="http://localhost:8888"
-            spellCheck={false}
-            className="w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 py-1.5 font-mono text-xs text-parchment-100 placeholder:text-parchment-600/60 focus:border-bronze-600 focus:outline-none"
-          />
-        </Field>
+        <p className="rounded-md border border-ink-700 bg-ink-850 px-2.5 py-2 text-[11px] leading-relaxed text-parchment-600">
+          The SearXNG instance is configured by the server (the{" "}
+          <span className="font-mono text-parchment-400">SEARXNG_URL</span>{" "}
+          environment variable) — the bundled docker-compose points it at the
+          internal SearXNG automatically. There's no per-user URL, so a search
+          can only ever reach the instance the operator chose.
+        </p>
         <div className="flex gap-3">
           <Field label="Max results">
             <NumberInput

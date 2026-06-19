@@ -3,7 +3,9 @@ import {
   Endpoint,
   Settings,
   SystemPrompt,
+  ToolOutputLimits,
   ToolSettings,
+  UsagePricing,
   WindowKind,
   WindowSizeSpec,
   WorkspaceAgentConfig,
@@ -38,7 +40,6 @@ export function uid(prefix = ""): string {
 export const DEFAULT_TOOL_SETTINGS: ToolSettings = {
   webSearch: {
     enabled: false,
-    searxngUrl: "http://localhost:8888",
     maxResults: 5,
     safeSearch: 1,
     throttleMs: 0,
@@ -51,6 +52,17 @@ export const DEFAULT_TOOL_SETTINGS: ToolSettings = {
     remember: true,
     loadSkill: true,
   },
+};
+
+/**
+ * Fixed caps on how much a single tool result can pour into the model's
+ * context. These are an internal constant, not user-tunable: they're passed
+ * straight to the workspace agent's read_file / run_command tools so a verbose
+ * result can't blow up the context window.
+ */
+export const DEFAULT_TOOL_OUTPUT_LIMITS: ToolOutputLimits = {
+  readFileChars: 40000,
+  commandOutputChars: 8000,
 };
 
 /**
@@ -92,6 +104,11 @@ export const DEFAULT_CONTEXT_MANAGEMENT: ContextManagementSettings = {
   },
 };
 
+/** Default, empty pricing table. Costs are always shown in US dollars. */
+export function defaultPricing(): UsagePricing {
+  return { models: {} };
+}
+
 /** The settings a brand-new user starts with. `username` defaults from email. */
 export function defaultSettings(username = "admin"): Settings {
   return {
@@ -100,6 +117,9 @@ export function defaultSettings(username = "admin"): Settings {
     username,
     tools: DEFAULT_TOOL_SETTINGS,
     contextManagement: DEFAULT_CONTEXT_MANAGEMENT,
+    folders: [],
+    tags: [],
+    pricing: defaultPricing(),
   };
 }
 
@@ -147,11 +167,18 @@ export function seedSystemPrompts(
 
 /** Default + min/max sizes for each window kind, used for resizing. */
 export const WINDOW_SPECS: Record<WindowKind, WindowSizeSpec> = {
-  conversations: { defaultW: 680, defaultH: 540, minW: 420, minH: 320, maxW: 1100, maxH: 900 },
-  workspaces: { defaultW: 640, defaultH: 500, minW: 420, minH: 320, maxW: 1000, maxH: 860 },
+  library: { defaultW: 760, defaultH: 560, minW: 460, minH: 340, maxW: 1200, maxH: 920 },
+  usage: { defaultW: 720, defaultH: 560, minW: 480, minH: 360, maxW: 1100, maxH: 900 },
   memories: { defaultW: 580, defaultH: 540, minW: 420, minH: 360, maxW: 900, maxH: 880 },
   skills: { defaultW: 620, defaultH: 580, minW: 460, minH: 380, maxW: 1000, maxH: 900 },
   tools: { defaultW: 560, defaultH: 460, minW: 420, minH: 320, maxW: 900, maxH: 820 },
   systemPrompt: { defaultW: 640, defaultH: 600, minW: 460, minH: 380, maxW: 1000, maxH: 900 },
   settings: { defaultW: 760, defaultH: 600, minW: 560, minH: 420, maxW: 1100, maxH: 900 },
 };
+
+/** Maps a (possibly legacy) window kind string to a current one, for migration. */
+export function normalizeWindowKind(kind: string): WindowKind | null {
+  if (kind === "conversations" || kind === "workspaces") return "library";
+  if (kind in WINDOW_SPECS) return kind as WindowKind;
+  return null;
+}

@@ -13,16 +13,41 @@ import { useMimir } from "@/lib/store";
 import { WorkspaceFile } from "@/lib/types";
 import * as fs from "@/lib/workspace/fs";
 import { downloadWorkspaceZip, zipNameFor } from "@/lib/workspace/download";
+import {
+  buildUploadFromDataTransfer,
+  buildUploadFromFiles,
+  UploadNode,
+} from "@/lib/workspace/upload";
 import * as Icons from "@/components/icons";
+
+/**
+ * Custom drag type for *internal* moves (dragging a node onto a folder), so the
+ * explorer can tell them apart from an external file/zip upload (which arrives
+ * as "Files" on the DataTransfer).
+ */
+const MOVE_MIME = "application/x-mimir-path";
+
+/** Whether `src` may be moved into directory `destDir`. */
+function canDropInto(src: string, destDir: string): boolean {
+  if (!src) return false;
+  const s = fs.normalizePath(src);
+  const d = fs.normalizePath(destDir);
+  if (s === d) return false; // onto itself
+  if (d === s || d.startsWith(s + "/")) return false; // into itself/descendant
+  if (fs.parentPath(s) === d) return false; // already there
+  return true;
+}
 
 /**
  * File explorer for a workspace's virtual filesystem. Renders the tree, lets you
  * open files into the editor, and — via a right-click context menu modeled on
  * the tab menu — create files/folders (inside the clicked directory or at the
- * root), rename in place, download, and delete. A small inline composer handles
- * the "new file / new folder" name entry. Every mutation goes through the pure
- * fs ops and writes back to the store, so the agent and the user share one
- * filesystem and one undo-less truth.
+ * root), rename in place, download, and delete. Nodes can also be **dragged to
+ * move them**: drop one onto a folder to file it there, or onto the empty area
+ * to move it to the root. A small inline composer handles the "new file / new
+ * folder" name entry. Every mutation goes through the pure fs ops and writes
+ * back to the store, so the agent and the user share one filesystem and one
+ * undo-less truth.
  */
 export default function FileExplorer({
   workspaceId,
@@ -41,7 +66,17 @@ export default function FileExplorer({
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [zipping, setZipping] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  // Internal move drag: which node is being dragged, and the directory ("/" for
+  // root) currently hovered as a drop target.
+  const [dragPath, setDragPath] = useState<string | null>(null);
+  const [dropDir, setDropDir] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Depth counter so nested dragenter/leave events don't flicker the overlay.
+  const dragDepth = useRef(0);
 
   // Inline create composer: which kind, and the directory it creates into ("/"
   // for root). Shown as a row under that directory.
@@ -159,6 +194,30 @@ export default function FileExplorer({
     }
   }
 
+  /** Move a node into a directory ("/" = root) via drag-and-drop. */
+  function moveInto(src: string, destDir: string) {
+    setError(null);
+    if (!canDropInto(src, destDir)) return;
+    const srcNorm = fs.normalizePath(src);
+    const dir = fs.normalizePath(destDir);
+    const dest = `${dir === "/" ? "" : dir}/${fs.baseName(srcNorm)}`;
+    try {
+      const wasSelected =
+        selectedPath === srcNorm ||
+        (selectedPath && selectedPath.startsWith(srcNorm + "/"));
+      const { files: next } = fs.movePath(files, srcNorm, dest);
+      setFiles(workspaceId, next);
+      const destNorm = fs.normalizePath(dest);
+      if (wasSelected) {
+        if (selectedPath === srcNorm) onSelect(destNorm);
+        else if (selectedPath) onSelect(destNorm + selectedPath.slice(srcNorm.length));
+      }
+      if (dir !== "/") ensureExpanded(dir);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
   function remove(path: string) {
     try {
       setFiles(workspaceId, fs.deletePath(files, path).files);
@@ -174,9 +233,17 @@ export default function FileExplorer({
   }
 
   function download(node: WorkspaceFile) {
-    const blob = new Blob([node.content], {
-      type: "text/plain;charset=utf-8",
-    });
+    // Binary files are stored base64 — decode to real bytes so the download is
+    // byte-identical; text files download as UTF-8.
+    let blob: Blob;
+    if (fs.isBinary(node)) {
+      const bin = atob(node.content.replace(/\s+/g, ""));
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      blob = new Blob([bytes], { type: "application/octet-stream" });
+    } else {
+      blob = new Blob([node.content], { type: "text/plain;charset=utf-8" });
+    }
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -203,6 +270,101 @@ export default function FileExplorer({
 
   const hasFiles = files.some((f) => f.type === "file");
 
+  // Apply uploaded nodes onto the current filesystem (dirs first, then files,
+  // each through the same pure fs ops the rest of the explorer uses).
+  const applyUpload = useCallback(
+    (nodes: UploadNode[]) => {
+      const now = Date.now();
+      let out = files;
+      for (const n of nodes) {
+        if (n.type === "dir") out = fs.makeDir(out, n.path, now);
+      }
+      for (const n of nodes) {
+        if (n.type === "file") {
+          out = fs.writeFile(out, n.path, n.content, now, n.encoding).files;
+        }
+      }
+      setFiles(workspaceId, out);
+    },
+    [files, setFiles, workspaceId]
+  );
+
+  const summarizeUpload = useCallback(
+    (nodeCount: number, skipped: { name: string; reason: string }[]) => {
+      if (skipped.length === 0) {
+        setNotice(
+          nodeCount > 0
+            ? `Added ${nodeCount} item${nodeCount === 1 ? "" : "s"}.`
+            : "Nothing to add."
+        );
+      } else {
+        const first = skipped[0];
+        setNotice(
+          `Added ${nodeCount} item${nodeCount === 1 ? "" : "s"}; skipped ${
+            skipped.length
+          } (${first.name}: ${first.reason}${
+            skipped.length > 1 ? ", …" : ""
+          }).`
+        );
+      }
+    },
+    []
+  );
+
+  const uploadFiles = useCallback(
+    async (list: FileList | File[]) => {
+      setUploading(true);
+      setError(null);
+      setNotice(null);
+      try {
+        const { nodes, skipped } = await buildUploadFromFiles(list, "/");
+        applyUpload(nodes);
+        summarizeUpload(nodes.filter((n) => n.type === "file").length, skipped);
+      } catch (e) {
+        setError(`Upload failed — ${(e as Error).message}`);
+      } finally {
+        setUploading(false);
+      }
+    },
+    [applyUpload, summarizeUpload]
+  );
+
+  const onDrop = useCallback(
+    async (e: React.DragEvent) => {
+      e.preventDefault();
+      dragDepth.current = 0;
+      setDragOver(false);
+      if (!e.dataTransfer || e.dataTransfer.types.indexOf("Files") === -1)
+        return;
+      setUploading(true);
+      setError(null);
+      setNotice(null);
+      try {
+        const { nodes, skipped } = await buildUploadFromDataTransfer(
+          e.dataTransfer,
+          "/"
+        );
+        applyUpload(nodes);
+        summarizeUpload(nodes.filter((n) => n.type === "file").length, skipped);
+      } catch (err) {
+        setError(`Upload failed — ${(err as Error).message}`);
+      } finally {
+        setUploading(false);
+      }
+    },
+    [applyUpload, summarizeUpload]
+  );
+
+  function onDragEnter(e: React.DragEvent) {
+    if (e.dataTransfer?.types?.indexOf("Files") === -1) return;
+    dragDepth.current += 1;
+    setDragOver(true);
+  }
+  function onDragLeave() {
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragOver(false);
+  }
+
   function openMenu(e: React.MouseEvent, path: string | null) {
     e.preventDefault();
     e.stopPropagation();
@@ -225,6 +387,31 @@ export default function FileExplorer({
         <span className="flex-1 font-mono text-[10px] uppercase tracking-[0.2em] text-parchment-600">
           Files
         </span>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            if (e.target.files && e.target.files.length) {
+              void uploadFiles(e.target.files);
+            }
+            e.target.value = "";
+          }}
+        />
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          title="Upload files or a .zip into the workspace"
+          aria-label="Upload files"
+          className="rounded p-1 text-parchment-600 transition-colors hover:bg-ink-800 hover:text-parchment-100 disabled:cursor-not-allowed disabled:opacity-30"
+        >
+          {uploading ? (
+            <Icons.IconSpark className="h-4 w-4 mimir-spin text-bronze-400" />
+          ) : (
+            <Icons.IconUpload className="h-4 w-4" />
+          )}
+        </button>
         <button
           onClick={() => downloadZip("/")}
           disabled={!hasFiles || zipping}
@@ -261,6 +448,18 @@ export default function FileExplorer({
           {error}
         </div>
       )}
+      {notice && !error && (
+        <div className="flex items-center gap-2 border-b border-ink-700 bg-ink-850 px-3 py-1.5 text-[11px] text-parchment-400">
+          <span className="flex-1">{notice}</span>
+          <button
+            onClick={() => setNotice(null)}
+            className="text-parchment-600 hover:text-parchment-100"
+            aria-label="Dismiss"
+          >
+            <Icons.IconClose className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Root-level create composer (when targeting "/"). */}
       {creating && creating.dir === "/" && (
@@ -274,9 +473,53 @@ export default function FileExplorer({
       )}
 
       <div
-        className="min-h-0 flex-1 overflow-y-auto py-1"
+        className="relative min-h-0 flex-1 overflow-y-auto py-1"
         onContextMenu={(e) => openMenu(e, null)}
+        onDragEnter={onDragEnter}
+        onDragOver={(e) => {
+          if (dragPath) {
+            // Internal move: dropping on empty space targets the root.
+            if (canDropInto(dragPath, "/")) {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              setDropDir("/");
+            }
+            return;
+          }
+          if (e.dataTransfer?.types?.indexOf("Files") !== -1) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+          }
+        }}
+        onDragLeave={onDragLeave}
+        onDrop={(e) => {
+          const moving =
+            e.dataTransfer.getData(MOVE_MIME) ||
+            (e.dataTransfer.types.indexOf("Files") === -1 ? dragPath : null);
+          if (moving) {
+            e.preventDefault();
+            moveInto(moving, "/");
+            setDragPath(null);
+            setDropDir(null);
+            return;
+          }
+          void onDrop(e);
+        }}
       >
+        {dragOver && (
+          <div className="pointer-events-none absolute inset-1 z-10 flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-bronze-500 bg-ink-950/80 text-center">
+            <Icons.IconUpload className="h-7 w-7 text-bronze-300" />
+            <div className="text-sm font-medium text-parchment-100">
+              Drop to upload
+            </div>
+            <div className="px-6 text-[11px] text-parchment-500">
+              Files, folders, and .zip archives are added to the workspace.
+            </div>
+          </div>
+        )}
+        {dragPath && dropDir === "/" && !dragOver && (
+          <div className="pointer-events-none absolute inset-1 z-10 rounded-lg border-2 border-dashed border-bronze-500/50" />
+        )}
         {rootChildren.length === 0 && !creating ? (
           <button
             onContextMenu={(e) => openMenu(e, null)}
@@ -306,6 +549,15 @@ export default function FileExplorer({
             onCreateDraft={setDraft}
             onCommitCreate={commitCreate}
             onCancelCreate={() => setCreating(null)}
+            dragPath={dragPath}
+            dropDir={dropDir}
+            onDragStartNode={setDragPath}
+            onDragEndNode={() => {
+              setDragPath(null);
+              setDropDir(null);
+            }}
+            onDropTarget={setDropDir}
+            onMoveInto={moveInto}
           />
         )}
       </div>
@@ -353,6 +605,13 @@ interface TreeSharedProps {
   onCreateDraft: (s: string) => void;
   onCommitCreate: () => void;
   onCancelCreate: () => void;
+  /* internal drag-to-move */
+  dragPath: string | null;
+  dropDir: string | null;
+  onDragStartNode: (path: string) => void;
+  onDragEndNode: () => void;
+  onDropTarget: (dir: string | null) => void;
+  onMoveInto: (src: string, destDir: string) => void;
 }
 
 function Tree({
@@ -395,15 +654,62 @@ function Row({
   const open = isDir && !shared.collapsed.has(node.path);
   const selected = shared.selectedPath === node.path;
   const isRenaming = shared.renaming === node.path;
+  const isDragging = shared.dragPath === node.path;
+  const isDropTarget =
+    isDir &&
+    !!shared.dragPath &&
+    shared.dropDir === node.path &&
+    canDropInto(shared.dragPath, node.path);
 
   return (
     <li>
       <div
+        draggable={!isRenaming}
+        onDragStart={(e) => {
+          e.stopPropagation();
+          e.dataTransfer.setData(MOVE_MIME, node.path);
+          e.dataTransfer.setData("text/plain", node.path);
+          e.dataTransfer.effectAllowed = "move";
+          shared.onDragStartNode(node.path);
+        }}
+        onDragEnd={(e) => {
+          e.stopPropagation();
+          shared.onDragEndNode();
+        }}
+        onDragOver={
+          isDir
+            ? (e) => {
+                if (shared.dragPath && canDropInto(shared.dragPath, node.path)) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  e.dataTransfer.dropEffect = "move";
+                  shared.onDropTarget(node.path);
+                }
+              }
+            : undefined
+        }
+        onDrop={
+          isDir
+            ? (e) => {
+                const moving =
+                  e.dataTransfer.getData(MOVE_MIME) || shared.dragPath;
+                if (moving) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  shared.onMoveInto(moving, node.path);
+                  shared.onDragEndNode();
+                }
+              }
+            : undefined
+        }
         className={[
           "group flex cursor-pointer items-center gap-1.5 pr-2 text-sm transition-colors",
-          selected
+          isDropTarget
+            ? "bg-bronze-600/25 text-parchment-100 ring-1 ring-inset ring-bronze-500/60"
+            : selected
             ? "bg-bronze-600/15 text-parchment-100"
             : "text-parchment-400 hover:bg-ink-850",
+          isDragging ? "opacity-50" : "",
         ].join(" ")}
         style={indent}
         onClick={() =>

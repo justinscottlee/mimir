@@ -72,12 +72,12 @@ function mimeFor(path: string): string {
 /** Turn a workspace file into a data: URL (text files become utf-8 data URLs). */
 function toDataUrl(file: WorkspaceFile): string {
   const mime = mimeFor(file.path);
-  // SVG and other text assets: inline as URI-encoded utf-8 (handles emoji etc).
-  if (mime.startsWith("image/svg") || mime.startsWith("text/")) {
-    return `data:${mime};charset=utf-8,${encodeURIComponent(file.content)}`;
+  // Binary assets (images, fonts) are stored base64 — emit a base64 data URL so
+  // they render byte-for-byte in the preview iframe.
+  if (file.encoding === "base64") {
+    return `data:${mime};base64,${file.content.replace(/\s+/g, "")}`;
   }
-  // Binary-ish content isn't really stored (the FS is text), so fall back to
-  // utf-8 too; in practice agents reference text assets in previews.
+  // SVG and other text assets: inline as URI-encoded utf-8 (handles emoji etc).
   return `data:${mime};charset=utf-8,${encodeURIComponent(file.content)}`;
 }
 

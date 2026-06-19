@@ -130,7 +130,8 @@ export function writeFile(
   files: WorkspaceFile[],
   path: string,
   content: string,
-  now = Date.now()
+  now = Date.now(),
+  encoding?: WorkspaceFile["encoding"]
 ): WriteResult {
   const p = normalizePath(path);
   if (p === "/") throw new Error("cannot write to the root path");
@@ -138,16 +139,19 @@ export function writeFile(
   if (existing && existing.type === "dir") {
     throw new Error(`"${p}" is a directory, not a file`);
   }
+  // Keep utf8 implicit (undefined) so text nodes stay clean; only persist the
+  // encoding marker for binary (base64) content.
+  const enc = encoding === "base64" ? "base64" : undefined;
   let out = withAncestorDirs(files, p, now);
   if (existing) {
     out = out.map((f) =>
-      f.path === p ? { ...f, content, updatedAt: now } : f
+      f.path === p ? { ...f, content, encoding: enc, updatedAt: now } : f
     );
     return { files: out, created: false };
   }
   out = [
     ...out,
-    { path: p, type: "file", content, createdAt: now, updatedAt: now },
+    { path: p, type: "file", content, encoding: enc, createdAt: now, updatedAt: now },
   ];
   return { files: out, created: true };
 }
@@ -271,6 +275,30 @@ export function lineCount(content: string): number {
   return content.split("\n").length;
 }
 
+/** True when a node holds base64-encoded binary bytes rather than text. */
+export function isBinary(file: WorkspaceFile): boolean {
+  return file.encoding === "base64";
+}
+
+/** Number of bytes a base64 payload decodes to, without decoding it. */
+export function base64ByteLength(b64: string): number {
+  const s = b64.replace(/\s+/g, "");
+  if (s.length === 0) return 0;
+  const pad = s.endsWith("==") ? 2 : s.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((s.length * 3) / 4) - pad);
+}
+
+/** Real byte length of a file node (UTF-8 bytes, or decoded base64 bytes). */
+export function byteLength(file: WorkspaceFile): number {
+  if (file.type === "dir") return 0;
+  if (file.encoding === "base64") return base64ByteLength(file.content);
+  // UTF-8 byte length — characters outside ASCII take more than one byte.
+  if (typeof TextEncoder !== "undefined") {
+    return new TextEncoder().encode(file.content).length;
+  }
+  return file.content.length;
+}
+
 export function humanBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -279,6 +307,11 @@ export function humanBytes(bytes: number): string {
 
 export function humanSize(content: string): string {
   return humanBytes(content.length);
+}
+
+/** Binary-aware human size for a file node. */
+export function nodeSize(file: WorkspaceFile): string {
+  return humanBytes(byteLength(file));
 }
 
 /**
@@ -302,7 +335,9 @@ export function renderTree(files: WorkspaceFile[], root = "/"): string {
       const label =
         child.type === "dir"
           ? `${baseName(child.path)}/`
-          : `${baseName(child.path)} · ${lineCount(child.content)} lines`;
+          : isBinary(child)
+            ? `${baseName(child.path)} · ${nodeSize(child)} (binary)`
+            : `${baseName(child.path)} · ${lineCount(child.content)} lines`;
       lines.push(prefix + branch + label);
       if (child.type === "dir") {
         walk(child.path, prefix + (last ? "   " : "│  "));
@@ -321,7 +356,11 @@ export function flatManifest(files: WorkspaceFile[]): string {
     .sort((a, b) => a.path.localeCompare(b.path));
   if (fileNodes.length === 0) return "(empty — no files yet)";
   return fileNodes
-    .map((f) => `- ${f.path} (${lineCount(f.content)} lines, ${humanSize(f.content)})`)
+    .map((f) =>
+      isBinary(f)
+        ? `- ${f.path} (binary, ${nodeSize(f)})`
+        : `- ${f.path} (${lineCount(f.content)} lines, ${nodeSize(f)})`
+    )
     .join("\n");
 }
 
@@ -339,7 +378,7 @@ export function fsStats(files: WorkspaceFile[]): FsStats {
     if (f.type === "dir") dirCount++;
     else {
       fileCount++;
-      bytes += f.content.length;
+      bytes += byteLength(f);
     }
   }
   return { files: fileCount, dirs: dirCount, bytes };

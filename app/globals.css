@@ -168,6 +168,30 @@ body {
   animation: mimir-spin 1.4s linear infinite;
 }
 
+/* Blinking block caret for the interactive terminal. */
+@keyframes mimir-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+.mimir-caret {
+  animation: mimir-blink 1.1s steps(1) infinite;
+  vertical-align: text-bottom;
+}
+
+/* The terminal's focusable surface fills its pane; it conveys focus with the
+   block caret and footer hint, so it should never draw the global focus ring
+   (which would otherwise box the whole pane on click). */
+.mimir-term-surface:focus,
+.mimir-term-surface:focus-visible {
+  outline: none;
+}
+
 /* Checkerboard backdrop so transparency is visible in the SVG preview. */
 .mimir-checker {
   background-color: #2a3037;

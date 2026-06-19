@@ -1,10 +1,12 @@
 /** Minimal stroke icons, 16x16 viewBox, inherit currentColor. */
 interface IconProps {
     className?: string;
+    style?: React.CSSProperties;
 }
 function Svg({
                  children,
                  className,
+                 style,
              }: IconProps & { children: React.ReactNode }) {
     return (
         <svg
@@ -15,6 +17,7 @@ function Svg({
             strokeLinecap="round"
             strokeLinejoin="round"
             className={className ?? "h-4 w-4"}
+            style={style}
             aria-hidden
         >
             {children}
@@ -237,5 +240,21 @@ export const IconSliders = (p: IconProps) => (
         <path d="M2.67 4.67H10M12.67 4.67H13.33M2.67 11.33H6M8.67 11.33H13.33" />
         <circle cx="11" cy="4.67" r="1.33" />
         <circle cx="7" cy="11.33" r="1.33" />
+    </Svg>
+);export const IconTag = (p: IconProps) => (
+    <Svg {...p}>
+        <path d="M2.67 2.67H7.33L13.33 8.67L8.67 13.33L2.67 7.33V2.67Z" />
+        <circle cx="5.33" cy="5.33" r="0.9" fill="currentColor" stroke="none" />
+    </Svg>
+);
+export const IconUpload = (p: IconProps) => (
+    <Svg {...p}>
+        <path d="M8 10.67V2M8 2L4.67 5.33M8 2L11.33 5.33M2.67 13.33H13.33" />
+    </Svg>
+);
+export const IconCoin = (p: IconProps) => (
+    <Svg {...p}>
+        <circle cx="8" cy="8" r="5.33" />
+        <path d="M8 5.33V10.67M9.67 6.5C9.67 5.7 8.9 5.33 8 5.33C7.1 5.33 6.33 5.7 6.33 6.5C6.33 8.3 9.67 7.5 9.67 9.5C9.67 10.3 8.9 10.67 8 10.67C7.1 10.67 6.33 10.3 6.33 9.5" />
     </Svg>
 );

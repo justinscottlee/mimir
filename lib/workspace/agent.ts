@@ -1,5 +1,12 @@
 import { ApiMessage, streamChat, ToolDef } from "../llama";
-import { ToolEvent, ToolRegistry, toolMarker, TOOL_MARKER_RE } from "../tools";
+import {
+  ToolEvent,
+  ToolRegistry,
+  toolMarker,
+  TOOL_MARKER_RE,
+  parseToolArgs,
+  runToolHandler,
+} from "../tools";
 import {
   AgentRun,
   AgentRunStatus,
@@ -10,6 +17,7 @@ import {
 import { flatManifest, renderTree } from "./fs";
 import { composeAgentSystem } from "./agentPrompts";
 import { renderPlan } from "./planTool";
+import { CONTEXT_COMPACTION_TOOL } from "../contextManager";
 
 /**
  * The workspace agent loop. Where `runToolLoop` (lib/tools.ts) resolves a single
@@ -26,10 +34,9 @@ import { renderPlan } from "./planTool";
  * the run's persisted steps so resume survives a page reload.
  *
  * The loop also drives the plan checklist (via the plan tools' effect on the
- * run), sub-agent coordination (the registry may include the sub-agent tools),
- * and per-step message delivery (unread messages are surfaced in the system
- * prompt). It streams every token and tool event out through callbacks so the
- * workspace UI renders the run live.
+ * run) and per-step message delivery (unread messages are surfaced in the
+ * system prompt). It streams every token and tool event out through callbacks
+ * so the workspace UI renders the run live.
  */
 
 /** The tool the agent calls to end its run with a summary of what it did. */
@@ -54,9 +61,6 @@ export const TASK_COMPLETE_TOOL: ToolDef = {
 };
 
 export const TASK_COMPLETE_NAME = "task_complete";
-
-/** Reserved synthetic tool name used to surface a summarization pass in the UI. */
-const CONTEXT_COMPACTION_TOOL = "context_compaction";
 
 /** Strips ⟦tool:N⟧ markers and <think> blocks from step text for replay. */
 function cleanStepTextForReplay(content: string): string {
@@ -155,6 +159,8 @@ export function buildAgentSystem(args: {
   const { files, instructions, toolNames } = args;
   const canExecute = toolNames.includes("run_command");
   const hasPlanning = toolNames.includes("set_plan");
+  const canWeb =
+    toolNames.includes("web_search") || toolNames.includes("web_fetch");
 
   const planText =
     args.plan && args.plan.length > 0
@@ -168,6 +174,7 @@ export function buildAgentSystem(args: {
     instructions,
     extraSystemPrompts: args.extraSystemPrompts,
     canExecute,
+    canWeb,
     hasPlanning,
     toolNames,
     filesystem: filesystemBlock(files),
@@ -284,7 +291,8 @@ export async function runAgentTurn(
   let stepsRun = 0;
   let stepIndex = startStepIndex;
 
-  const budgetLeft = () => priorTokens + turnTokens >= maxTokens;
+  // True once this turn's tokens (plus the run's prior tokens) reach the cap.
+  const budgetExhausted = () => priorTokens + turnTokens >= maxTokens;
 
   for (let step = 0; step < maxSteps; step++) {
     const idx = stepIndex++;
@@ -407,7 +415,7 @@ export async function runAgentTurn(
         content:
           "You did not call any tool. Remember: you are running autonomously and must act through tools. If the task is fully complete, call task_complete with a summary now. Otherwise continue the work by calling your tools — do not just describe what you would do.",
       });
-      if (budgetLeft()) {
+      if (budgetExhausted()) {
         status = "max_tokens";
         break;
       }
@@ -430,12 +438,7 @@ export async function runAgentTurn(
     let finished = false;
     for (let i = 0; i < toolCalls.length; i++) {
       const call = toolCalls[i];
-      let parsedArgs: Record<string, unknown> = {};
-      try {
-        parsedArgs = call.arguments ? JSON.parse(call.arguments) : {};
-      } catch {
-        parsedArgs = {};
-      }
+      const parsedArgs = parseToolArgs(call.arguments);
 
       // Show the tool as in-flight *before* running it: inject its marker and
       // emit a pending event so a live, spinning chip with the command appears
@@ -459,16 +462,7 @@ export async function runAgentTurn(
         resultText = "Run marked complete.";
         finished = true;
       } else {
-        const handler = liveRegistry[call.name];
-        if (!handler) {
-          resultText = `Error: no tool named "${call.name}" is available.`;
-        } else {
-          try {
-            resultText = await handler.run(parsedArgs);
-          } catch (e) {
-            resultText = `Error: ${(e as Error).message}`;
-          }
-        }
+        resultText = await runToolHandler(liveRegistry, call.name, parsedArgs);
       }
 
       const event: ToolEvent = {
@@ -508,7 +502,7 @@ export async function runAgentTurn(
       status = "done";
       break;
     }
-    if (budgetLeft()) {
+    if (budgetExhausted()) {
       status = "max_tokens";
       break;
     }

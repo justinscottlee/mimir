@@ -1,6 +1,7 @@
 import { ToolHandler } from "../tools";
 import { WorkspaceExecResult, WorkspaceFile } from "../types";
 import { api } from "../api";
+import { DEFAULT_TOOL_OUTPUT_LIMITS } from "../defaults";
 import { WorkspaceFsApi } from "./filesystemTool";
 
 /**
@@ -32,7 +33,8 @@ const RUN_COMMAND_DESCRIPTION =
 export function buildRunCommandTool(
   workspaceId: string,
   fsApi: WorkspaceFsApi,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  commandOutputCap: number = DEFAULT_TOOL_OUTPUT_LIMITS.commandOutputChars
 ): ToolHandler {
   return {
     def: {
@@ -78,13 +80,16 @@ export function buildRunCommandTool(
         fsApi.setFiles(payload.files);
       }
 
-      return formatResult(payload.result);
+      return formatResult(payload.result, commandOutputCap);
     },
   };
 }
 
 /** Format an execution result as a compact, model-friendly transcript. */
-export function formatResult(r: WorkspaceExecResult): string {
+export function formatResult(
+  r: WorkspaceExecResult,
+  outputCap: number = DEFAULT_TOOL_OUTPUT_LIMITS.commandOutputChars
+): string {
   const status = r.timedOut
     ? `timed out after ${(r.durationMs / 1000).toFixed(1)}s (killed)`
     : `exit ${r.exitCode} · ${(r.durationMs / 1000).toFixed(1)}s`;
@@ -98,10 +103,10 @@ export function formatResult(r: WorkspaceExecResult): string {
   const stdout = r.stdout.trim();
   const stderr = r.stderr.trim();
   if (stdout) {
-    lines.push("", "stdout:", clip(stdout));
+    lines.push("", "stdout:", clip(stdout, outputCap));
   }
   if (stderr) {
-    lines.push("", "stderr:", clip(stderr));
+    lines.push("", "stderr:", clip(stderr, outputCap));
   }
   if (!stdout && !stderr) {
     lines.push("", "(no output)");
@@ -121,9 +126,6 @@ export function formatResult(r: WorkspaceExecResult): string {
 }
 
 // Keep tool-result output bounded so a noisy command can't flood the context.
-const MODEL_OUTPUT_CAP = 8000;
-function clip(s: string): string {
-  return s.length > MODEL_OUTPUT_CAP
-    ? s.slice(0, MODEL_OUTPUT_CAP) + "\n…(truncated)"
-    : s;
+function clip(s: string, cap: number): string {
+  return s.length > cap ? s.slice(0, cap) + "\n…(truncated)" : s;
 }

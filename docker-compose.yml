@@ -18,6 +18,13 @@ services:
       # Web search talks to the bundled SearXNG container directly — no Tools URL
       # needed. (Point this elsewhere to use an external SearXNG instead.)
       SEARXNG_URL: http://searxng:8080
+      # Workspaces execute in the bundled multi-toolchain image (built by the
+      # sandbox-image service below: gcc/g++, Python, Node, Go, Rust, git, …).
+      # Override per workspace in its agent settings, or edit this line.
+      SANDBOX_IMAGE: mimir-sandbox:latest
+      # Give executed code internet access by default (needed for pip/npm/cargo
+      # installs). Set SANDBOX_NETWORK=none in .env to cut it off for isolation.
+      SANDBOX_NETWORK: ${SANDBOX_NETWORK:-bridge}
     # Lets the container reach services running on the host (e.g. a llama.cpp
     # server on localhost) via http://host.docker.internal:<port>.
     extra_hosts:
@@ -39,7 +46,21 @@ services:
         condition: service_healthy
       valkey:
         condition: service_healthy
+      sandbox-image:
+        condition: service_completed_successfully
     restart: unless-stopped
+
+  # Build-only helper: builds the multi-toolchain sandbox image and exits. Mimir
+  # waits for it (service_completed_successfully) so the image exists in the
+  # host's Docker before any workspace tries to start a container from it. It
+  # talks to the same daemon Mimir uses (compose builds tag it locally).
+  sandbox-image:
+    build:
+      context: ./sandbox
+    image: mimir-sandbox:latest
+    container_name: mimir-sandbox-build
+    command: ["true"]
+    restart: "no"
 
   postgres:
     image: postgres:16-alpine

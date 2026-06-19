@@ -459,7 +459,7 @@ function AddEndpoint({
         <textarea
           value={manualText}
           onChange={(e) => setManualText(e.target.value)}
-          placeholder={"claude-opus-4-6\nclaude-sonnet-4-6"}
+          placeholder={"claude-opus-4-8\nclaude-sonnet-4-6"}
           rows={2}
           spellCheck={false}
           className="mt-1 w-full resize-none rounded-md border border-ink-700 bg-ink-850 px-2.5 py-1.5 font-mono text-xs text-parchment-100 placeholder:text-parchment-600/60 focus:border-bronze-600 focus:outline-none"
@@ -550,9 +550,12 @@ function SystemSection() {
         subtitle="Where your data goes."
       />
       <p className="mt-3 text-sm leading-relaxed text-parchment-400">
-        Conversations, memories, skills, and settings are stored locally in your
-        browser. Prompts are sent only to the endpoints you configure. Nothing
-        is sent anywhere else unless you use an externally hosted endpoint.
+        Conversations, memories, skills, and settings are stored on the server
+        you run Mimir on — in its PostgreSQL database (with Valkey as a cache),
+        scoped to your account. Model prompts go only to the endpoints you
+        configure, and web searches only to the SearXNG instance the server is
+        pointed at. Nothing is sent anywhere else unless you configure an
+        externally hosted endpoint or a remote SearXNG.
       </p>
     </div>
   );

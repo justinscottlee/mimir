@@ -11,9 +11,11 @@ import {
 } from "@/lib/workspace/filesystemTool";
 import { buildRunCommandTool } from "@/lib/workspace/execTool";
 import { buildPlanningTools, PlanApi } from "@/lib/workspace/planTool";
+import { webSearchTool, webFetchTool } from "@/lib/webtools";
 import { runAgentTurn, reconstructWorkingHistory } from "@/lib/workspace/agent";
 import { workspaceScopedPromptTexts } from "@/lib/systemPrompts";
 import { makeContextRuntime } from "@/lib/contextManager";
+import { DEFAULT_TOOL_OUTPUT_LIMITS } from "@/lib/defaults";
 
 /**
  * The agent runtime for a single workspace, exposed as a hook.
@@ -136,14 +138,35 @@ export function useWorkspaceRunner(workspaceId: string): WorkspaceRunner {
 
       const controller = new AbortController();
 
+      // Fixed internal caps on how much a single tool result can pour into
+      // context (not user-tunable — see DEFAULT_TOOL_OUTPUT_LIMITS).
+      const limits = DEFAULT_TOOL_OUTPUT_LIMITS;
+
       // Filesystem always; shell always (it self-reports when unavailable);
       // planning always. No sub-agent tools — agents are single. The shell tool
       // gets the run's abort signal so Stop interrupts a long command promptly.
       const registry: ToolRegistry = {
-        ...buildFilesystemTools(fsApi),
-        run_command: buildRunCommandTool(workspaceId, fsApi, controller.signal),
+        ...buildFilesystemTools(fsApi, limits.readFileChars),
+        run_command: buildRunCommandTool(
+          workspaceId,
+          fsApi,
+          controller.signal,
+          limits.commandOutputChars
+        ),
         ...buildPlanningTools(planApiFor(runId)),
       };
+
+      // Web tools are opt-in, gated by the same switches as chat (Tools window).
+      // When on, the agent can search and fetch pages to inform its work.
+      const toolCfg = state.settings.tools;
+      if (toolCfg.webSearch?.enabled) {
+        const h = webSearchTool(toolCfg.webSearch);
+        registry[h.def.function.name] = h;
+      }
+      if (toolCfg.webFetch?.enabled) {
+        const h = webFetchTool(toolCfg.webFetch);
+        registry[h.def.function.name] = h;
+      }
 
       updateWorkspaceRun(workspaceId, runId, { status: "running" });
 

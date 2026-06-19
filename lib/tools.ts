@@ -1,4 +1,5 @@
 import { ApiMessage, ChatResult, streamChat, ToolDef } from "./llama";
+import { CONTEXT_COMPACTION_TOOL } from "./contextManager";
 
 /**
  * A registered tool: the schema advertised to the model plus the handler that
@@ -20,9 +21,6 @@ export type ToolRegistry = Record<string, ToolHandler>;
 
 /** OpenAI-style chat message, including the tool/assistant-tool-call shapes. */
 export type ChatMessage = ApiMessage;
-
-/** Reserved synthetic tool name used to surface a summarization pass in the UI. */
-const CONTEXT_COMPACTION_TOOL = "context_compaction";
 
 export interface RunLoopParams {
   endpoint: string;
@@ -63,6 +61,42 @@ export interface ToolEvent {
 export const TOOL_MARKER_RE = /⟦tool:(\d+)⟧/g;
 export function toolMarker(index: number): string {
   return `\n\n⟦tool:${index}⟧\n\n`;
+}
+
+/**
+ * Parse a tool call's JSON arguments, tolerating empty or malformed input
+ * (models occasionally emit invalid JSON). Always returns an object. Shared by
+ * the chat and agent loops so they parse identically.
+ */
+export function parseToolArgs(rawArguments?: string): Record<string, unknown> {
+  if (!rawArguments) return {};
+  try {
+    const v = JSON.parse(rawArguments);
+    return v && typeof v === "object" ? (v as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Run a tool handler from a registry with uniform error capture, or report an
+ * unknown tool. The result string is fed back to the model as the tool result.
+ * Shared by both loops; the differing parts (how the in-flight/finished chips
+ * are surfaced, marker indexing, task_complete, abort handling) stay in each
+ * loop because their transcript models intentionally differ.
+ */
+export async function runToolHandler(
+  registry: ToolRegistry,
+  name: string,
+  args: Record<string, unknown>
+): Promise<string> {
+  const handler = registry[name];
+  if (!handler) return `Error: no tool named "${name}" is available.`;
+  try {
+    return await handler.run(args);
+  } catch (e) {
+    return `Error: ${(e as Error).message}`;
+  }
 }
 
 export interface RunLoopResult {
@@ -202,16 +236,11 @@ export async function runToolLoop(
     // Execute each call and append its result.
     for (let i = 0; i < toolCalls.length; i++) {
       const call = toolCalls[i];
-      const handler = liveRegistry[call.name];
+      const known = !!liveRegistry[call.name];
+      const parsedArgs = parseToolArgs(call.arguments);
       let resultText: string;
-      let parsedArgs: Record<string, unknown> = {};
-      try {
-        parsedArgs = call.arguments ? JSON.parse(call.arguments) : {};
-      } catch {
-        parsedArgs = {};
-      }
 
-      if (!handler) {
+      if (!known) {
         resultText = `Error: no tool named "${call.name}" is available.`;
       } else {
         // Reserve this event's slot and show a live, spinning chip *before* the
@@ -230,15 +259,11 @@ export async function runToolLoop(
         toolEvents.push(pendingEvent);
         onToolEvent?.(pendingEvent);
         onText(committed);
-        try {
-          resultText = await handler.run(parsedArgs);
-        } catch (e) {
-          resultText = `Error: ${(e as Error).message}`;
-        }
+        resultText = await runToolHandler(liveRegistry, call.name, parsedArgs);
       }
 
       const event: ToolEvent = {
-        index: handler ? toolEvents.length - 1 : toolEvents.length,
+        index: known ? toolEvents.length - 1 : toolEvents.length,
         name: call.name,
         args: parsedArgs,
         result: resultText,
@@ -248,7 +273,7 @@ export async function runToolLoop(
       if (pruneInfo) {
         event.pruned = { before: pruneInfo.before, after: pruneInfo.after };
       }
-      if (handler) {
+      if (known) {
         // Replace the pending chip (same index) with the finished one.
         toolEvents[event.index] = event;
       } else {

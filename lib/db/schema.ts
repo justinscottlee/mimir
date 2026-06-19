@@ -108,6 +108,10 @@ export const conversations = pgTable(
     title: text("title").notNull(),
     model: text("model"),
     webToolsEnabled: boolean("web_tools_enabled"),
+    /** Library organization: parent folder, color tags, pin state. */
+    folderId: text("folder_id"),
+    tagIds: jsonb("tag_ids").notNull().default([]),
+    pinned: boolean("pinned").notNull().default(false),
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
   },
@@ -158,6 +162,10 @@ export const workspaces = pgTable(
     model: text("model"),
     /** WorkspaceAgentConfig — max steps/tokens + standing instructions. */
     agent: jsonb("agent"),
+    /** Library organization: parent folder, color tags, pin state. */
+    folderId: text("folder_id"),
+    tagIds: jsonb("tag_ids").notNull().default([]),
+    pinned: boolean("pinned").notNull().default(false),
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
   },
   (t) => ({
@@ -182,6 +190,8 @@ export const workspaceFiles = pgTable(
     /** "file" | "dir" */
     type: text("type").notNull(),
     content: text("content").notNull().default(""),
+    /** "utf8" (default) | "base64" — base64 holds binary file bytes. */
+    encoding: text("encoding"),
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
   },
@@ -307,6 +317,18 @@ export const settings = pgTable("settings", {
   tools: jsonb("tools").notNull(),
   /** ContextManagementSettings (tool pruning + summarization). */
   contextManagement: jsonb("context_management"),
+  /**
+   * @deprecated No longer read or written. read_file / run_command output caps
+   * are now a fixed internal constant (DEFAULT_TOOL_OUTPUT_LIMITS), not a
+   * per-user setting. Column kept (nullable) to avoid a destructive migration.
+   */
+  toolOutput: jsonb("tool_output"),
+  /** Folder[] — Library folder definitions. */
+  folders: jsonb("folders").notNull().default([]),
+  /** Tag[] — color-coded tag definitions. */
+  tags: jsonb("tags").notNull().default([]),
+  /** UsagePricing — per-model token pricing for the usage view. */
+  pricing: jsonb("pricing"),
   updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
 });
 

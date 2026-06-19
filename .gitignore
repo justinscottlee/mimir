@@ -3,5 +3,6 @@ node_modules/
 out/
 *.tsbuildinfo
 next-env.d.ts
+.auth-secret
 .env
 searxng/

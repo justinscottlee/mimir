@@ -252,8 +252,8 @@ function StatusBox({ status }: { status: PlanItemStatus }) {
   }
   if (status === "active") {
     return (
-      <span className="flex h-4 w-4 items-center justify-center rounded-full border border-bronze-400">
-        <Icons.IconSpark className="h-3 w-3 mimir-spin text-bronze-400" />
+      <span className="flex h-4 w-4 items-center justify-center text-bronze-400">
+        <Icons.IconSpark className="h-3.5 w-3.5 mimir-spin" />
       </span>
     );
   }

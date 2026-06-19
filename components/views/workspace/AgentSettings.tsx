@@ -8,8 +8,8 @@ import * as Icons from "@/components/icons";
 
 /**
  * A popover for tuning the agent loop: which persona (how methodical it is),
- * how many steps it may take, its output token budget, whether it may spawn
- * sub-agents, and standing instructions folded into every run's system prompt.
+ * how many steps it may take, its output token budget, the sandbox network it
+ * runs in, and standing instructions folded into every run's system prompt.
  * Edits write straight to the workspace's agent config.
  */
 export default function AgentSettings({
@@ -94,7 +94,7 @@ export default function AgentSettings({
               <Num
                 value={agent.maxSteps}
                 min={1}
-                max={50}
+                max={200}
                 disabled={disabled}
                 onChange={(n) => setConfig(workspaceId, { maxSteps: n })}
               />
@@ -104,13 +104,44 @@ export default function AgentSettings({
               <Num
                 value={agent.maxTokens}
                 min={512}
-                max={200000}
+                max={1048576}
                 step={512}
                 disabled={disabled}
                 onChange={(n) => setConfig(workspaceId, { maxTokens: n })}
               />
             </label>
           </div>
+
+          {/* Sandbox */}
+          <div className="mb-2 mt-3 font-mono text-[10px] uppercase tracking-[0.18em] text-parchment-600">
+            Sandbox
+          </div>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-parchment-600">Internet access</span>
+            <select
+              value={agent.sandboxNetwork ?? ""}
+              disabled={disabled}
+              onChange={(e) =>
+                setConfig(workspaceId, {
+                  sandboxNetwork:
+                    e.target.value === "none"
+                      ? "none"
+                      : e.target.value === "bridge"
+                      ? "bridge"
+                      : undefined,
+                })
+              }
+              className="rounded-md border border-ink-700 bg-ink-850 px-2.5 py-1.5 text-xs text-parchment-100 focus:border-bronze-600 focus:outline-none disabled:opacity-50"
+            >
+              <option value="">Server default</option>
+              <option value="bridge">On — allow installs (pip/npm/cargo)</option>
+              <option value="none">Off — no internet (most isolated)</option>
+            </select>
+          </label>
+          <p className="mt-1 text-[11px] leading-relaxed text-parchment-600">
+            Runs in the default Mimir sandbox image. Changing the network starts
+            a fresh container on the next command.
+          </p>
 
           {/* Standing instructions */}
           <label className="mt-3 flex flex-col gap-1">

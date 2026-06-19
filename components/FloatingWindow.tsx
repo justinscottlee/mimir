@@ -5,8 +5,8 @@ import { useMimir, WINDOW_SPECS } from "@/lib/store";
 import { FloatingWindow as Win, WindowKind } from "@/lib/types";
 import { useIsMobile } from "@/lib/useMediaQuery";
 import { IconClose } from "./icons";
-import ConversationsView from "./views/ConversationsView";
-import WorkspacesView from "./views/WorkspacesView";
+import LibraryView from "./views/LibraryView";
+import UsageView from "./views/UsageView";
 import MemoriesView from "./views/MemoriesView";
 import SkillsView from "./views/SkillsView";
 import ToolsView from "./views/ToolsView";
@@ -14,8 +14,8 @@ import SystemPromptView from "./views/SystemPromptView";
 import SettingsView from "./views/SettingsView";
 
 const WINDOW_TITLES: Record<WindowKind, string> = {
-  conversations: "Conversations",
-  workspaces: "Workspaces",
+  library: "Library",
+  usage: "Usage & cost",
   memories: "Memories",
   skills: "Skills",
   tools: "Tools",
@@ -227,10 +227,10 @@ function FloatingWindow({ win, isMobile }: { win: Win; isMobile: boolean }) {
 
 function WindowContent({ kind }: { kind: WindowKind }) {
   switch (kind) {
-    case "conversations":
-      return <ConversationsView />;
-    case "workspaces":
-      return <WorkspacesView />;
+    case "library":
+      return <LibraryView />;
+    case "usage":
+      return <UsageView />;
     case "memories":
       return <MemoriesView />;
     case "skills":

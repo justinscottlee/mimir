@@ -31,10 +31,15 @@ import {
   MAX_WORKSPACE_RUNS,
   WINDOW_SPECS,
   defaultSettings,
+  normalizeWindowKind,
   seedSystemPrompts,
   uid,
 } from "./defaults";
 import * as sync from "./sync";
+import {
+  createOrganizationSlice,
+  OrganizationSlice,
+} from "./store-slices/organizationSlice";
 
 // Re-exported so existing imports (`import { uid, useMimir, WINDOW_SPECS }
 // from "@/lib/store"`) keep working unchanged.
@@ -56,7 +61,7 @@ export interface PartialToolSettings {
 /** Lifecycle of the server-backed store. */
 export type StoreStatus = "idle" | "loading" | "ready" | "error";
 
-interface MimirState {
+export interface MimirState extends OrganizationSlice {
   /** Hydration lifecycle: idle (signed out) → loading → ready. */
   status: StoreStatus;
 
@@ -92,6 +97,12 @@ interface MimirState {
   setActiveTab: (tabId: string) => void;
   moveTabBefore: (dragTabId: string, targetTabId: string) => void;
   renameTabRef: (tabId: string, title: string) => void;
+  /**
+   * Delete the conversation/workspace behind a (just-closed) tab if it's still
+   * empty — no messages sent / no files or runs — so closing an untouched tab
+   * doesn't leave an empty shell behind in the Library.
+   */
+  discardIfEmpty: (kind: TabKind, refId: string) => void;
 
   // Windows
   openWindow: (kind: WindowKind) => void;
@@ -217,6 +228,9 @@ interface MimirState {
   setSearchOpen: (open: boolean) => void;
 }
 
+/* Organization (folders/tags) + usage pricing actions live in a dedicated
+ * slice; MimirState mixes them in via OrganizationSlice (see below). */
+
 /** Empty initial state used before hydration and after sign-out. */
 function emptyState() {
   return {
@@ -236,7 +250,7 @@ function emptyState() {
   };
 }
 
-export const useMimir = create<MimirState>()((set, get) => ({
+export const useMimir = create<MimirState>()((set, get, store) => ({
   ...emptyState(),
 
   // ---------- Lifecycle ----------
@@ -260,6 +274,17 @@ export const useMimir = create<MimirState>()((set, get) => ({
   /** Replaces local state with a server snapshot without echoing saves back. */
   hydrate: (snapshot) => {
     suspendSync(() => {
+      // Defensively migrate window kinds here too: a snapshot cached before the
+      // conversations/workspaces windows merged into "library" could otherwise
+      // carry a kind with no WINDOW_SPECS entry and crash the window layer.
+      const seen = new Set<string>();
+      const windows: FloatingWindow[] = [];
+      for (const w of snapshot.ui.windows) {
+        const kind = normalizeWindowKind(w.kind as string);
+        if (!kind || seen.has(kind)) continue;
+        seen.add(kind);
+        windows.push({ ...w, kind });
+      }
       set({
         conversations: snapshot.conversations,
         workspaces: snapshot.workspaces,
@@ -269,7 +294,7 @@ export const useMimir = create<MimirState>()((set, get) => ({
         settings: snapshot.settings,
         tabs: snapshot.ui.tabs,
         activeTabId: snapshot.ui.activeTabId,
-        windows: snapshot.ui.windows,
+        windows,
         zTop: snapshot.ui.zTop,
         status: "ready",
       });
@@ -296,6 +321,7 @@ export const useMimir = create<MimirState>()((set, get) => ({
 
   closeTab: (tabId) => {
     const { tabs, activeTabId } = get();
+    const closing = tabs.find((t) => t.id === tabId);
     const idx = tabs.findIndex((t) => t.id === tabId);
     const next = tabs.filter((t) => t.id !== tabId);
     let nextActive = activeTabId;
@@ -303,12 +329,15 @@ export const useMimir = create<MimirState>()((set, get) => ({
       nextActive = next[Math.max(0, idx - 1)]?.id ?? null;
     }
     set({ tabs: next, activeTabId: nextActive });
+    if (closing) get().discardIfEmpty(closing.kind, closing.refId);
   },
 
   closeOtherTabs: (tabId) => {
     const { tabs } = get();
     if (!tabs.some((t) => t.id === tabId)) return;
+    const removed = tabs.filter((t) => t.id !== tabId);
     set({ tabs: tabs.filter((t) => t.id === tabId), activeTabId: tabId });
+    for (const t of removed) get().discardIfEmpty(t.kind, t.refId);
   },
 
   closeTabsToRight: (tabId) => {
@@ -316,10 +345,41 @@ export const useMimir = create<MimirState>()((set, get) => ({
     const idx = tabs.findIndex((t) => t.id === tabId);
     if (idx === -1) return;
     const next = tabs.slice(0, idx + 1);
+    const removed = tabs.slice(idx + 1);
     const nextActive = next.some((t) => t.id === activeTabId)
       ? activeTabId
       : tabId;
     set({ tabs: next, activeTabId: nextActive });
+    for (const t of removed) get().discardIfEmpty(t.kind, t.refId);
+  },
+
+  /**
+   * Drop an untouched conversation/workspace once its tab is gone. "Empty" means
+   * a chat with no messages, or a workspace with no files and no agent runs.
+   * Guarded so a ref still open in another tab is never deleted.
+   */
+  discardIfEmpty: (kind, refId) => {
+    const s = get();
+    if (s.tabs.some((t) => t.kind === kind && t.refId === refId)) return;
+    if (kind === "chat") {
+      const conv = s.conversations[refId];
+      if (!conv || conv.messages.length > 0) return;
+      set((st) => {
+        const conversations = { ...st.conversations };
+        delete conversations[refId];
+        return { conversations };
+      });
+      void sync.deleteConversation(refId);
+    } else {
+      const ws = s.workspaces[refId];
+      if (!ws || ws.files.length > 0 || ws.runs.length > 0) return;
+      set((st) => {
+        const workspaces = { ...st.workspaces };
+        delete workspaces[refId];
+        return { workspaces };
+      });
+      void sync.deleteWorkspace(refId);
+    }
   },
 
   setActiveTab: (tabId) => set({ activeTabId: tabId }),
@@ -1090,6 +1150,9 @@ export const useMimir = create<MimirState>()((set, get) => ({
         },
       };
     }),
+
+  // ---------- Organization + pricing (extracted slice) ----------
+  ...createOrganizationSlice(set, get, store),
 
   setSearchOpen: (open) => set({ searchOpen: open }),
 }));

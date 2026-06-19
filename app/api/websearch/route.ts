@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { clampInt, ensureSlash } from "@/lib/server/http";
 
 /**
  * Runs a web search by forwarding the model's query to a self-hosted SearXNG
@@ -26,7 +27,6 @@ const TIME_RANGES = new Set(["day", "week", "month", "year"]);
 export async function POST(req: NextRequest) {
   let body: {
     query?: string;
-    searxngUrl?: string;
     maxResults?: number;
     safeSearch?: number;
     timeRange?: string;
@@ -42,18 +42,18 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "A non-empty 'query' is required." }, { status: 400 });
   }
 
-  // Resolve SearXNG from the server's own environment first. In compose this is
-  // set to the internal service (http://searxng:8080), so search works with no
-  // user configuration and a stale browser setting (e.g. localhost) can't break
-  // it. Falls back to the URL the client sends when no env is set (host dev).
-  const base = (process.env.SEARXNG_URL || body.searxngUrl || "").trim();
+  // SearXNG is configured by the server (SEARXNG_URL), never by the client, so
+  // a search can only ever reach the instance the operator chose. In compose
+  // this is the internal service (http://searxng:8080); set it in .env for host
+  // mode. There is intentionally no per-user URL.
+  const base = (process.env.SEARXNG_URL || "").trim();
   if (!base) {
     return Response.json(
       {
         error:
-          "No SearXNG URL configured. Set SEARXNG_URL on the server, or a URL in the Tools window.",
+          "Web search isn't configured on the server. Set SEARXNG_URL (the bundled docker-compose does this automatically).",
       },
-      { status: 400 }
+      { status: 503 }
     );
   }
 
@@ -123,14 +123,4 @@ export async function POST(req: NextRequest) {
         : `Could not reach SearXNG at ${base}. Is it running?`;
     return Response.json({ error: msg }, { status: 502 });
   }
-}
-
-function ensureSlash(base: string): string {
-  return base.endsWith("/") ? base : base + "/";
-}
-
-function clampInt(v: number, min: number, max: number): number {
-  const n = Math.round(Number(v));
-  if (!Number.isFinite(n)) return min;
-  return Math.min(max, Math.max(min, n));
 }

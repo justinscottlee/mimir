@@ -69,6 +69,14 @@ function pushBytes(out: number[], b: Uint8Array) {
   for (let i = 0; i < b.length; i++) out.push(b[i]);
 }
 
+/** Decode a base64 string to raw bytes (browser `atob`). */
+function base64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64.replace(/\s+/g, ""));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
 /** MS-DOS time/date packing for ZIP entries. */
 function dosDateTime(d: Date): { time: number; date: number } {
   const time =
@@ -220,7 +228,12 @@ export async function downloadWorkspaceZip(
         data: new Uint8Array(0),
       });
     } else {
-      entries.push({ name: rel, data: enc.encode(f.content) });
+      // Binary files are stored base64 — decode them to real bytes so the
+      // archived file is byte-identical to the original.
+      const data = fs.isBinary(f)
+        ? base64ToBytes(f.content)
+        : enc.encode(f.content);
+      entries.push({ name: rel, data });
     }
   }
 

@@ -120,6 +120,12 @@ export default function FileEditor({
     );
   }
 
+  // Binary files can't be edited as text — show a viewer (image preview when we
+  // can, otherwise a size summary) rather than dumping base64 into a textarea.
+  if (fs.isBinary(file)) {
+    return <BinaryFileView path={path} content={file.content} bytes={fs.byteLength(file)} />;
+  }
+
   const lines = fs.lineCount(draft);
 
   return (
@@ -226,6 +232,76 @@ function ModeTab({
     >
       {label}
     </button>
+  );
+}
+
+const IMAGE_EXT: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  bmp: "image/bmp",
+  ico: "image/x-icon",
+  avif: "image/avif",
+};
+
+/**
+ * Viewer for a binary (base64) file. Images render from a base64 data URL on a
+ * checkerboard so transparency shows; everything else gets a short summary —
+ * the bytes are safe in the store and downloadable from the file explorer, they
+ * just aren't text to edit.
+ */
+function BinaryFileView({
+  path,
+  content,
+  bytes,
+}: {
+  path: string;
+  content: string;
+  bytes: number;
+}) {
+  const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
+  const imageMime = IMAGE_EXT[ext];
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center gap-2 border-b border-ink-700 px-3 py-2">
+        <Icons.IconFile className="h-4 w-4 shrink-0 text-parchment-600" />
+        <span className="min-w-0 flex-1 truncate font-mono text-xs text-parchment-100">
+          {path}
+        </span>
+        <span className="rounded border border-ink-700 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-parchment-600">
+          binary
+        </span>
+      </div>
+
+      {imageMime ? (
+        <div className="mimir-checker flex min-h-0 flex-1 items-center justify-center overflow-auto p-4">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`data:${imageMime};base64,${content.replace(/\s+/g, "")}`}
+            alt={path}
+            className="max-h-full max-w-full object-contain"
+          />
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
+          <Icons.IconFile className="h-10 w-10 text-parchment-600" />
+          <div className="text-sm text-parchment-300">
+            Binary file — {fs.humanBytes(bytes)}
+          </div>
+          <div className="max-w-sm text-xs leading-relaxed text-parchment-600">
+            This file isn&apos;t text, so there&apos;s nothing to edit here. Use
+            the download button in the file explorer to save it.
+          </div>
+        </div>
+      )}
+
+      <div className="border-t border-ink-700 px-3 py-1.5 font-mono text-[10px] text-parchment-600">
+        {fs.humanBytes(bytes)} · binary ({ext || "no ext"})
+      </div>
+    </div>
   );
 }
 

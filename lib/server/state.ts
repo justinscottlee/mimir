@@ -18,15 +18,18 @@ import {
   AgentRunStatus,
   AgentStep,
   Conversation,
+  Folder,
   Memory,
   Message,
   MessageMeta,
   Settings,
   Skill,
   SystemPrompt,
+  Tag,
   ToolEventRecord,
   ToolSettings,
   Endpoint,
+  UsagePricing,
   UserStateSnapshot,
   UserUiState,
   Workspace,
@@ -36,7 +39,9 @@ import {
 import {
   DEFAULT_AGENT_CONFIG,
   DEFAULT_CONTEXT_MANAGEMENT,
+  defaultPricing,
   defaultSettings,
+  normalizeWindowKind,
   seedSystemPrompts,
 } from "@/lib/defaults";
 import {
@@ -80,6 +85,9 @@ async function ensureSeeded(userId: string, username: string): Promise<void> {
         username: s.username,
         tools: s.tools,
         contextManagement: s.contextManagement,
+        folders: s.folders,
+        tags: s.tags,
+        pricing: s.pricing,
         updatedAt: new Date(),
       })
       .onConflictDoNothing();
@@ -216,6 +224,9 @@ async function readUserState(
       createdAt: ms(c.createdAt),
       updatedAt: ms(c.updatedAt),
       webToolsEnabled: c.webToolsEnabled ?? undefined,
+      folderId: c.folderId ?? undefined,
+      tagIds: (c.tagIds as string[] | null) ?? [],
+      pinned: c.pinned ?? false,
     };
   }
 
@@ -227,6 +238,7 @@ async function readUserState(
       path: f.path,
       type: f.type as WorkspaceFile["type"],
       content: f.content,
+      encoding: (f.encoding as WorkspaceFile["encoding"]) ?? undefined,
       createdAt: ms(f.createdAt),
       updatedAt: ms(f.updatedAt),
     });
@@ -263,6 +275,9 @@ async function readUserState(
       agent: (w.agent as WorkspaceAgentConfig | null) ?? {
         ...DEFAULT_AGENT_CONFIG,
       },
+      folderId: w.folderId ?? undefined,
+      tagIds: (w.tagIds as string[] | null) ?? [],
+      pinned: w.pinned ?? false,
     };
   }
 
@@ -320,15 +335,30 @@ async function readUserState(
         contextManagement:
           (sRow.contextManagement as Settings["contextManagement"]) ??
           DEFAULT_CONTEXT_MANAGEMENT,
+        folders: (sRow.folders as Folder[] | null) ?? [],
+        tags: (sRow.tags as Tag[] | null) ?? [],
+        pricing: (sRow.pricing as UsagePricing | null) ?? defaultPricing(),
       }
     : defaultSettings(username);
 
   const uiRow = uiRows[0];
+  const rawWindows = (uiRow?.windows as UserUiState["windows"]) ?? [];
+  // Migrate legacy window kinds (the separate "conversations"/"workspaces"
+  // windows merged into one "library" window) and keep a single window per
+  // kind, since the UI assumes one instance of each manager.
+  const seenKinds = new Set<string>();
+  const windows: UserUiState["windows"] = [];
+  for (const w of rawWindows) {
+    const kind = normalizeWindowKind(w.kind as string);
+    if (!kind || seenKinds.has(kind)) continue;
+    seenKinds.add(kind);
+    windows.push({ ...w, kind });
+  }
   const ui: UserUiState = uiRow
     ? {
         tabs: (uiRow.tabs as UserUiState["tabs"]) ?? [],
         activeTabId: uiRow.activeTabId ?? null,
-        windows: (uiRow.windows as UserUiState["windows"]) ?? [],
+        windows,
         zTop: uiRow.zTop ?? 10,
       }
     : { tabs: [], activeTabId: null, windows: [], zTop: 10 };
@@ -366,6 +396,9 @@ export async function upsertConversation(
         model: conv.model ?? null,
         webToolsEnabled:
           conv.webToolsEnabled === undefined ? null : conv.webToolsEnabled,
+        folderId: conv.folderId ?? null,
+        tagIds: conv.tagIds ?? [],
+        pinned: conv.pinned ?? false,
         createdAt: toDate(conv.createdAt),
         updatedAt: toDate(conv.updatedAt),
       })
@@ -376,6 +409,9 @@ export async function upsertConversation(
           model: conv.model ?? null,
           webToolsEnabled:
             conv.webToolsEnabled === undefined ? null : conv.webToolsEnabled,
+          folderId: conv.folderId ?? null,
+          tagIds: conv.tagIds ?? [],
+          pinned: conv.pinned ?? false,
           updatedAt: toDate(conv.updatedAt),
         },
         // Only update rows owned by this user.
@@ -429,6 +465,9 @@ export async function upsertWorkspace(
         name: ws.name,
         model: ws.model ?? null,
         agent: ws.agent ?? null,
+        folderId: ws.folderId ?? null,
+        tagIds: ws.tagIds ?? [],
+        pinned: ws.pinned ?? false,
         createdAt: toDate(ws.createdAt),
       })
       .onConflictDoUpdate({
@@ -437,6 +476,9 @@ export async function upsertWorkspace(
           name: ws.name,
           model: ws.model ?? null,
           agent: ws.agent ?? null,
+          folderId: ws.folderId ?? null,
+          tagIds: ws.tagIds ?? [],
+          pinned: ws.pinned ?? false,
         },
         // Only update rows owned by this user.
         setWhere: eq(wsT.userId, userId),
@@ -464,6 +506,7 @@ export async function upsertWorkspace(
           path: f.path,
           type: f.type,
           content: f.content,
+          encoding: f.encoding ?? null,
           createdAt: toDate(f.createdAt),
           updatedAt: toDate(f.updatedAt),
         }))
@@ -513,6 +556,31 @@ export async function userOwnsWorkspace(
     .where(and(eq(wsT.id, workspaceId), eq(wsT.userId, userId)))
     .limit(1);
   return rows.length > 0;
+}
+
+/**
+ * The per-workspace sandbox override (network mode only), read straight from
+ * the stored agent config. Resolved server-side so the exec/pty routes apply it
+ * for both the terminal and the agent without trusting the client. The
+ * toolchain image is never overridable per-workspace — it is always the
+ * server-configured `SANDBOX_IMAGE` (the default Mimir sandbox).
+ */
+export async function getWorkspaceSandboxOverride(
+  userId: string,
+  workspaceId: string
+): Promise<{ network?: "none" | "bridge" }> {
+  const rows = await db
+    .select({ agent: wsT.agent })
+    .from(wsT)
+    .where(and(eq(wsT.id, workspaceId), eq(wsT.userId, userId)))
+    .limit(1);
+  const agent = rows[0]?.agent as WorkspaceAgentConfig | null | undefined;
+  if (!agent) return {};
+  const network =
+    agent.sandboxNetwork === "bridge" || agent.sandboxNetwork === "none"
+      ? agent.sandboxNetwork
+      : undefined;
+  return { network };
 }
 
 export async function upsertMemory(userId: string, mem: Memory): Promise<void> {
@@ -641,6 +709,9 @@ export async function saveSettings(
       username: settings.username,
       tools: settings.tools,
       contextManagement: settings.contextManagement,
+      folders: settings.folders,
+      tags: settings.tags,
+      pricing: settings.pricing,
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
@@ -653,6 +724,9 @@ export async function saveSettings(
         username: settings.username,
         tools: settings.tools,
         contextManagement: settings.contextManagement,
+        folders: settings.folders,
+        tags: settings.tags,
+        pricing: settings.pricing,
         updatedAt: new Date(),
       },
     });

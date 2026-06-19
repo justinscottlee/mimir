@@ -1,5 +1,8 @@
 import { requireUser, jsonOk, jsonError } from "@/lib/server/session";
-import { userOwnsWorkspace } from "@/lib/server/state";
+import {
+  userOwnsWorkspace,
+  getWorkspaceSandboxOverride,
+} from "@/lib/server/state";
 import { sandbox } from "@/lib/server/sandbox";
 import { WorkspaceFile } from "@/lib/types";
 
@@ -53,10 +56,15 @@ export async function POST(
     }
     const files = Array.isArray(body.files) ? body.files : [];
 
+    // The workspace may pin a toolchain image / network mode; resolve it
+    // server-side from the stored agent config and apply it to this run.
+    const override = await getWorkspaceSandboxOverride(u.id, params.id);
+
     const { result, files: updated } = await sandbox.exec(
       params.id,
       command,
-      files
+      files,
+      override
     );
     return jsonOk({ result, files: updated });
   } catch (err) {

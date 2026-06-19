@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import { useMimir } from "@/lib/store";
 import {
   IconBox,
-  IconChat,
+  IconCoin,
   IconClose,
   IconGear,
   IconPlus,
@@ -129,16 +129,10 @@ export default function Sidebar({
       <SectionLabel>Library</SectionLabel>
       <nav className="flex flex-col gap-1 px-2">
         <SidebarButton
-          label="Conversations"
-          icon={<IconChat />}
-          active={isOpen("conversations")}
-          onClick={go(() => openWindow("conversations"))}
-        />
-        <SidebarButton
-          label="Workspaces"
+          label="Library"
           icon={<IconBox />}
-          active={isOpen("workspaces")}
-          onClick={go(() => openWindow("workspaces"))}
+          active={isOpen("library")}
+          onClick={go(() => openWindow("library"))}
         />
       </nav>
 
@@ -167,6 +161,12 @@ export default function Sidebar({
           icon={<IconDoc />}
           active={isOpen("systemPrompt")}
           onClick={go(() => openWindow("systemPrompt"))}
+        />
+        <SidebarButton
+          label="Usage & cost"
+          icon={<IconCoin />}
+          active={isOpen("usage")}
+          onClick={go(() => openWindow("usage"))}
         />
       </nav>
 

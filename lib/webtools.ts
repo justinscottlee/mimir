@@ -136,7 +136,6 @@ export function webSearchTool(config: WebSearchConfig): ToolHandler {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query,
-          searxngUrl: config.searxngUrl,
           maxResults: config.maxResults,
           safeSearch: config.safeSearch,
           timeRange,
@@ -152,6 +151,7 @@ export function webSearchTool(config: WebSearchConfig): ToolHandler {
         title: string;
         url: string;
         snippet: string;
+        engine?: string;
         publishedDate?: string;
       }[] = data.results ?? [];
       const answers: string[] = data.answers ?? [];
@@ -169,7 +169,15 @@ export function webSearchTool(config: WebSearchConfig): ToolHandler {
       results.forEach((r, i) => {
         lines.push(`${i + 1}. ${r.title}`);
         lines.push(`   ${r.url}`);
-        if (r.publishedDate) lines.push(`   (published ${r.publishedDate})`);
+        // Attribute the source engine and date when SearXNG reports them, so
+        // the model can weigh and cite results.
+        const meta = [
+          r.engine ? `via ${r.engine}` : "",
+          r.publishedDate ? `published ${r.publishedDate}` : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        if (meta) lines.push(`   (${meta})`);
         if (r.snippet) lines.push(`   ${r.snippet}`);
         lines.push("");
       });

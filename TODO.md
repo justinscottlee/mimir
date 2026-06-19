@@ -1,18 +1,8 @@
-## Todo
+## Todo (near-term)
+
 - LATER scheduled/recurring agent tasks (e.g. a periodic memory-consolidation run).
-
-- make it so generation doesn't halt when the browser tab closes (needs server-side run execution; the run loop currently lives in the client).
-- adjust lower/upper bounds for things like agent steps, max token usage
-- get rid of searxng customizable url
-- uploading zips to workspaces needs to be possible (so you can send it a pre-existing project)
-- add somewhat extensive set of workspace toolchains. For example, we need gcc, python, rust, go, all of the popular languages and whatnot.
-
-
-<!-- ===========================================================================
-  Ideas below were added during a planning/documentation pass. Nothing here has
-  been implemented yet. They're grouped by type; refactor items each spell out
-  what they're meant to address.
-============================================================================ -->
+- Make it so generation doesn't halt when the browser tab closes (needs
+  server-side run execution; the run loop currently lives in the client).
 
 ## Major features
 
@@ -21,21 +11,11 @@
   stream. This is the enabler for the existing "generation shouldn't halt when
   the tab closes" item, and it also unblocks scheduled/recurring agents.
 
-- **Per-conversation system prompt.** System prompts are global-only today
-  (they apply to every chat and agent). Add a per-conversation prompt/override —
-  a small per-chat drawer or composer field — layered on top of the global set.
-
 - **Per-chat / per-agent generation parameters.** `lib/llama.ts` currently sends
   only `model` / `messages` / `tools` / `stream` — nothing sets temperature,
   top_p, top_k, max_tokens, repeat_penalty, seed, or stop sequences, so output
   is completely untunable. Add a sampling-params control (per conversation and
   per workspace agent, with sane defaults) and thread it through `streamChat`.
-
-- **Web access for workspace agents.** The agent's tool registry
-  (`useWorkspaceRunner`) is filesystem + `run_command` + planning only — an agent
-  can't look anything up mid-run. Wire `web_search` / `web_fetch` into the agent
-  registry (gated by the same Tools-window switches), so a coding agent can read
-  docs while it works.
 
 - **Multimodal / vision input.** Let users attach images (and maybe PDFs) to chat
   messages for models that accept image input — requires content-array messages
@@ -44,21 +24,6 @@
 - **Attach files/documents to a conversation as context.** Drop a file into a
   chat and have the model read it (direct context injection now; lightweight
   retrieval later for big files).
-
-- **Binary-file support in the workspace filesystem.** The store FS is text-only,
-  so images / PDFs / archives a command produces are skipped on sync and previews
-  can't render real binary images. Store binary nodes (e.g. base64) so generated
-  artifacts survive, downloads are faithful, and the editor can preview them.
-  Pairs with the "upload zips to workspaces" item.
-
-- **True interactive terminal (PTY / streaming).** Replace the run-to-completion
-  command runner with a streaming PTY so REPLs, interactive prompts, and
-  long-lived dev servers work, plus a preview proxy for servers an agent starts.
-
-- **Per-workspace sandbox image & network in the UI.** Surface `SANDBOX_IMAGE` /
-  `SANDBOX_NETWORK` (and maybe the resource limits) as per-workspace settings
-  rather than one global env, so different workspaces can use different
-  toolchains. Pairs with the "extensive workspace toolchains" item.
 
 - **Memory retrieval that scales.** `buildMemoryPrompt` injects *every* enabled
   memory on *every* request, which stops scaling past a few dozen. Add
@@ -71,103 +36,66 @@
   runner so the chat tool loop can run them (today only workspaces can). Removes
   a currently-documented stub.
 
-- **Conversation organization.** Folders / tags / pinning and richer
-  search-and-filter in the Conversations window.
-
 - **OAuth / social sign-in.** Better Auth makes additional providers a small
   addition — useful for shared instances.
 
 - **Export / import.** Export a conversation (Markdown/JSON) and a full-account
   backup; bulk-import skills, system prompts, and memories from files.
 
-- **Edit-in-place + branching.** Allow editing a prior user message (not just
-  resend-and-truncate) and branching a conversation from any message.
+- **Full-screen TUI support in the terminal.** The built-in ANSI model degrades
+  gracefully on the alternate screen, so `vim`/`htop`/`less` don't render
+  perfectly. Either grow the model to handle the alternate screen + scroll
+  regions, or adopt xterm.js behind the same SSE transport.
 
-- **Usage & cost view.** Aggregate tokens — and, for hosted endpoints, estimated
-  cost — per endpoint / conversation / agent run. The per-message stats already
-  capture the raw numbers.
+- **Inline run cost.** Tie the Usage pricing table into the workspace transcript
+  and chat so a run shows its estimated spend as it goes, not just in aggregate.
 
-- **Decision: default web tools on?** Now that `SEARXNG_URL` ships configured,
-  `web_search` / `web_fetch` still default OFF in `DEFAULT_TOOL_SETTINGS`. Decide
-  whether to flip them on by default (vs. keeping the explicit privacy opt-in).
+## Minor tweaks / UX
 
-## Bug fixes & correctness
+- **Library bulk actions.** Multi-select rows to tag / move / delete several at
+  once, and add explicit sort options (name, created, updated) beyond the current
+  pinned-then-recent ordering.
+- **Persist the active workspace center tab.** Which of Agent / Terminal / editor
+  is showing resets to Agent on reload; remember it per workspace.
+- **Keyboard nav in the file explorer.** Arrow-key movement, F2 to rename, Delete
+  to remove, so the tree is usable without the mouse alongside the new
+  drag-to-move.
+- **Confirm-on-close for tabs with an in-flight run.** Closing a tab mid-generation
+  silently stops the run; warn first (and once durable runs land, just detach).
+- **Terminal niceties.** Copy-on-select and right-click paste; a clear-screen
+  affordance; remember scrollback across a `restart`.
 
-- **Stale privacy copy.** Settings → System → Privacy still says data is "stored
-  locally in your browser." Data now lives in PostgreSQL, scoped to the account
-  (Valkey-cached). Rewrite the copy to match reality and clarify hosted-endpoint
-  egress.
+## Bug fixes / hardening
 
-- **`.env` secret-leak footgun.** `.gitignore` ignores `.env*.local` but NOT
-  `.env`, and docker compose requires `.env`. A real-looking `BETTER_AUTH_SECRET`
-  is currently committed in `.env`. Add `.env` to `.gitignore`, remove the
-  tracked `.env`, and rotate any committed secret. Optional hardening: have
-  `docker-entrypoint.sh` generate and persist a random secret when none is set,
-  so an instance never runs with a shared/empty one.
+- **Empty-tab discard edge cases.** Closing an untouched chat/workspace now
+  discards it (keyed on `messages.length` / `files`+`runs`). Double-check the
+  stop-before-first-token path so a conversation that started streaming but
+  produced nothing is handled the way the user expects.
+- **File drag-to-move onto a file row.** Dropping a node directly onto another
+  *file* currently bubbles to the container and lands at the root; consider
+  making a file row target its parent directory for a more intuitive drop.
+- **Terminal initial sizing.** `measure()` runs once on open and the
+  ResizeObserver corrects shortly after; on very fast tab switches the first
+  cols/rows can be momentarily off — an immediate post-`live` remeasure would
+  tighten it.
+- **Drop the deprecated `tool_output` column.** read_file / run_command caps are
+  now a fixed constant; the `settings.tool_output` jsonb column is unused and
+  flagged `@deprecated`. Remove it in a future migration once rows are reconciled.
+- **Prune the legacy `pricing.currency` field.** The usage view is now
+  dollars-only and the type dropped `currency`; stored `pricing` jsonb may still
+  carry an old `currency` key. Harmless (ignored), but a migration could prune it.
 
-- **Stale doc path in `types.ts`.** The `Memory` doc comment references a
-  non-existent `lib/memoryTool.ts` (twice) — the file is `lib/memory.ts`. Fix it
-  so the data model documents itself correctly.
+## Refactoring
 
-- **Dead "sub-agent" references.** Multi-agent delegation was removed, but
-  comments/docstrings still mention it in `lib/workspace/agent.ts`,
-  `useWorkspaceRunner.ts`, and `WorkspaceView.tsx` — and `AgentSettings.tsx`'s
-  docstring still claims it tunes "whether it may spawn sub-agents," which no
-  longer exists. Purge these so docs match the single-agent reality.
-
-- **Unused `engine` field.** `/api/websearch` parses and returns a per-result
-  `engine`, but `webtools.ts` never uses it when formatting results for the
-  model. Surface it or drop the plumbing.
-
-- **Stray `.dockerignore` entry.** It lists a leftover personal `mmm.zip`;
-  remove it (it's redundant with the `*.zip` line anyway).
-
-- **Placeholder drift.** The manual-models textareas in `SettingsView` disagree
-  on the example model id (`claude-opus-4-8` vs `claude-opus-4-6`); pick one.
-
-## Refactors (readability / maintainability / modularity / extensibility)
-
-- **Split `lib/store.ts` into per-domain slices.** It's ~36 KB with every action
-  in one file. Break it into conversations, workspaces/runs, memories, skills,
-  system prompts, settings/endpoints, and UI (tabs/windows) slices composed into
-  one Zustand store. *Addresses:* the readability, maintainability, and
-  merge-conflict surface of a single oversized file mixing many concerns; makes
-  each domain independently testable and extensible.
-
-- **Unify the chat and agent tool loops.** `runToolLoop` (`lib/tools.ts`) and
-  `runAgentTurn` (`lib/workspace/agent.ts`) independently re-implement nearly
-  identical logic: pending-chip emission, `⟦tool:N⟧` marker injection, running a
-  call, prune-info tagging, and compaction chips. Extract a shared
-  "stream-a-completion + run-its-tool-calls + emit-chips" primitive both build
-  on. *Addresses:* duplicated, drift-prone logic that must currently be kept in
-  sync by hand; lets new tool-loop behavior land in one place.
-
-- **One source for the `context_compaction` tool name.** It's hard-coded as a
-  separate constant in three files (`tools.ts`, `contextManager.ts` exports one,
-  `agent.ts` redefines it). Import the exported one everywhere. *Addresses:*
-  magic-string duplication that can silently drift and break the UI chip mapping.
-
-- **Rename `budgetLeft()` in `agent.ts`.** It returns `true` when the budget is
-  *exhausted* — the opposite of what the name reads as (`if (budgetLeft()) {
-  status = "max_tokens"; break; }`). Rename to `budgetExhausted()` or invert it.
-  *Addresses:* a genuinely misleading name in the loop's stop logic.
-
-- **Remove the no-op filter in `sandbox.ts`.** `synced.filter((f) => f.type !==
-  "dir" || true)` is always true (dead code). Drop it. *Addresses:* confusing
-  dead code in the file-sync path.
-
-- **Dedupe shared route helpers.** `clampInt` (and the HTML-entity / text
-  extraction helpers) are copy-pasted across `app/api/websearch/route.ts` and
-  `app/api/webfetch/route.ts`. Lift them into a small shared `lib/server/http.ts`.
-  *Addresses:* duplicated utility code.
-
-- **Centralize tool-output character caps.** `READ_CHAR_CAP` (filesystemTool),
-  `MODEL_OUTPUT_CAP` (execTool), web-fetch `maxChars`, and the sandbox output cap
-  are independent magic numbers. Gather them into one config surface (ideally
-  user-tunable alongside context management). *Addresses:* scattered limits that
-  should be discoverable and adjustable together.
-
-- **Give `streamChat` a single options object.** So sampling parameters (see the
-  generation-parameters feature) can be threaded through without touching every
-  call site. *Addresses:* turns that feature into a localized change instead of a
-  wide one.
+- **Keep extracting store slices.** `lib/store.ts` is large (~1.2k lines).
+  `organizationSlice` was the first lift; follow with `tabsSlice`,
+  `conversationsSlice`, and `workspacesSlice` along the same boundary.
+- **One context-menu primitive.** `TabBar`, `FileExplorer`, and `LibraryView`
+  each hand-roll a portal + viewport-clamp + outside-click + Escape context menu.
+  Extract a single `<ContextMenu>` and reuse it.
+- **One inline-rename primitive.** The tab title, file rows, and Library rows all
+  reimplement an input with Enter/Escape/blur-to-commit. Fold it into a small
+  hook or component.
+- **Shared `isEmptyRef` predicate.** The new tab-close cleanup decides "empty"
+  inline; lift it to a shared helper so the Library and any future call sites
+  agree on the definition.
