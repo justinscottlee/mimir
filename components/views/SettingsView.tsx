@@ -10,7 +10,7 @@ import {
 } from "@/lib/models";
 import { modelKey } from "@/lib/types";
 import ConfirmDelete from "../ConfirmDelete";
-import type { Endpoint } from "@/lib/types";
+import type { Endpoint, EndpointKind } from "@/lib/types";
 import { IconPlus } from "../icons";
 
 type Section = "models" | "system" | "account";
@@ -92,7 +92,7 @@ function ModelsSection() {
       <SectionHeading
         title="Endpoints"
         subtitle="Local llama.cpp servers or hosted OpenAI-compatible APIs (Groq, OpenAI, …). Add a key for hosted providers; local servers need none."
-      />        
+      />
 
       <div className="mt-4 flex flex-col gap-3">
         {settings.endpoints.map((ep) => {
@@ -105,12 +105,13 @@ function ModelsSection() {
               url={ep.url}
               apiKey={ep.apiKey}
               manualModels={ep.manualModels}
+              kind={ep.kind}
               status={
                 loading
                   ? "loading"
                   : load?.error
-                  ? load.error
-                  : `${load?.models.length ?? 0} models`
+                    ? load.error
+                    : `${load?.models.length ?? 0} models`
               }
               error={!!load?.error}
               onChange={(patch) => updateEndpoint(ep.id, patch)}
@@ -243,10 +244,10 @@ const PRESETS: {
 
 /** Password-style input with a show/hide toggle, for API keys. */
 function KeyField({
-  value,
-  onChange,
-  placeholder = "API key (optional for local servers)",
-}: {
+                    value,
+                    onChange,
+                    placeholder = "API key (optional for local servers)",
+                  }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
@@ -277,21 +278,23 @@ function KeyField({
 }
 
 function EndpointCard({
-  name,
-  url,
-  apiKey,
-  manualModels,
-  status,
-  error,
-  onChange,
-  onRemove,
-  canRemove,
-}: {
+                        name,
+                        url,
+                        apiKey,
+                        manualModels,
+                        kind,
+                        status,
+                        error,
+                        onChange,
+                        onRemove,
+                        canRemove,
+                      }: {
   id: string;
   name: string;
   url: string;
   apiKey?: string;
   manualModels?: string[];
+  kind?: EndpointKind;
   status: string;
   error: boolean;
   onChange: (patch: Partial<Endpoint>) => void;
@@ -326,6 +329,36 @@ function EndpointCard({
             />
           )}
         </div>
+      </div>
+
+      <div className="mt-2 flex items-center gap-2">
+        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-parchment-600">
+          Serves
+        </span>
+        <div className="flex overflow-hidden rounded-md border border-ink-700">
+          {(["text", "image", "both"] as const).map((k, i) => {
+            const active = (kind ?? "both") === k;
+            return (
+              <button
+                key={k}
+                type="button"
+                onClick={() => onChange({ kind: k })}
+                className={[
+                  "px-2.5 py-1 text-xs capitalize transition-colors",
+                  i > 0 ? "border-l border-ink-700" : "",
+                  active
+                    ? "bg-bronze-500 text-ink-950"
+                    : "bg-ink-850 text-parchment-400 hover:bg-ink-800 hover:text-parchment-200",
+                ].join(" ")}
+              >
+                {k}
+              </button>
+            );
+          })}
+        </div>
+        <span className="text-[10px] text-parchment-600">
+          which pickers list this endpoint
+        </span>
       </div>
 
       <div className="mt-2 flex items-center gap-2">
@@ -379,8 +412,8 @@ function EndpointCard({
 }
 
 function AddEndpoint({
-  onAdd,
-}: {
+                       onAdd,
+                     }: {
   onAdd: (
     name: string,
     url: string,
@@ -482,11 +515,11 @@ function AddEndpoint({
 
 
 function DefaultModelPicker({
-  label,
-  models,
-  value,
-  onChange,
-}: {
+                              label,
+                              models,
+                              value,
+                              onChange,
+                            }: {
   label: string;
   models: ReturnType<typeof resolveEnabledModels>;
   value?: string;
@@ -641,10 +674,10 @@ function AccountSection() {
 /* ------------------------------- shared ------------------------------- */
 
 function SectionHeading({
-  title,
-  subtitle,
-  className = "",
-}: {
+                          title,
+                          subtitle,
+                          className = "",
+                        }: {
   title: string;
   subtitle?: string;
   className?: string;

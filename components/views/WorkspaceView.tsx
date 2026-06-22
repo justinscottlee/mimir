@@ -6,6 +6,7 @@ import {
   EndpointLoad,
   loadAllModels,
   resolveEnabledModels,
+  modelsForModality,
 } from "@/lib/models";
 import { AgentRun, ResolvedModel } from "@/lib/types";
 import { useWorkspaceRunner } from "@/lib/workspace/useWorkspaceRunner";
@@ -31,8 +32,8 @@ type MobilePane = "files" | "main" | "agents";
  * straight into the store.
  */
 export default function WorkspaceView({
-  workspaceId,
-}: {
+                                        workspaceId,
+                                      }: {
   workspaceId: string;
 }) {
   const workspace = useMimir((s) => s.workspaces[workspaceId]);
@@ -55,8 +56,13 @@ export default function WorkspaceView({
   const isMobile = useIsMobile();
 
   const models = useMemo(
-    () => resolveEnabledModels(loads, settings.disabledModels),
-    [loads, settings.disabledModels]
+    () =>
+      modelsForModality(
+        resolveEnabledModels(loads, settings.disabledModels),
+        settings.endpoints,
+        "text"
+      ),
+    [loads, settings.disabledModels, settings.endpoints]
   );
 
   // Every run is a top-level agent; the focused one drives the transcript.
@@ -239,8 +245,8 @@ export default function WorkspaceView({
               centerTab === "file"
                 ? "Editor"
                 : centerTab === "terminal"
-                ? "Terminal"
-                : "Agent"
+                  ? "Terminal"
+                  : "Agent"
             }
             active={mobilePane === "main"}
             onClick={() => setMobilePane("main")}
@@ -382,8 +388,8 @@ export default function WorkspaceView({
               running
                 ? "Agent is working…"
                 : canContinue
-                ? "Send the agent a follow-up instruction — it continues where it left off."
-                : "Describe a task for a new agent — e.g. “Create a Python script that prints the first 20 primes, then a README explaining it.”"
+                  ? "Send the agent a follow-up instruction — it continues where it left off."
+                  : "Describe a task for a new agent — e.g. “Create a Python script that prints the first 20 primes, then a README explaining it.”"
             }
             spellCheck={false}
             className="max-h-40 min-h-[2.5rem] flex-1 resize-none overflow-hidden rounded-lg border border-ink-700 bg-ink-850 px-3 py-2 text-sm leading-relaxed text-parchment-100 placeholder:text-parchment-600/70 focus:border-bronze-600 focus:outline-none disabled:opacity-60"
@@ -428,9 +434,9 @@ function truncate(s: string, n: number): string {
 /* ------------------------------ subcomponents ---------------------------- */
 
 function WorkspaceName({
-  name,
-  onRename,
-}: {
+                         name,
+                         onRename,
+                       }: {
   name: string;
   onRename: (n: string) => void;
 }) {
@@ -479,11 +485,11 @@ function WorkspaceName({
 }
 
 function ModelSelect({
-  models,
-  value,
-  disabled,
-  onChange,
-}: {
+                       models,
+                       value,
+                       disabled,
+                       onChange,
+                     }: {
   models: ResolvedModel[];
   value?: string;
   disabled?: boolean;
@@ -509,30 +515,30 @@ function ModelSelect({
     >
       {groups.length === 1
         ? groups[0].items.map((m) => (
-            <option key={m.key} value={m.key}>
-              {m.modelId}
-            </option>
-          ))
+          <option key={m.key} value={m.key}>
+            {m.modelId}
+          </option>
+        ))
         : groups.map((g) => (
-            <optgroup key={g.name} label={g.name}>
-              {g.items.map((m) => (
-                <option key={m.key} value={m.key}>
-                  {m.modelId}
-                </option>
-              ))}
-            </optgroup>
-          ))}
+          <optgroup key={g.name} label={g.name}>
+            {g.items.map((m) => (
+              <option key={m.key} value={m.key}>
+                {m.modelId}
+              </option>
+            ))}
+          </optgroup>
+        ))}
     </select>
   );
 }
 
 function CenterTabButton({
-  icon,
-  label,
-  active,
-  onClick,
-  onClose,
-}: {
+                           icon,
+                           label,
+                           active,
+                           onClick,
+                           onClose,
+                         }: {
   icon: React.ReactNode;
   label: string;
   active: boolean;
@@ -566,10 +572,10 @@ function CenterTabButton({
 }
 
 function PaneTab({
-  label,
-  active,
-  onClick,
-}: {
+                   label,
+                   active,
+                   onClick,
+                 }: {
   label: string;
   active: boolean;
   onClick: () => void;

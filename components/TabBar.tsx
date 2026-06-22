@@ -3,7 +3,23 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMimir } from "@/lib/store";
-import {IconBox, IconChat, IconClose, IconMenu, IconPlus, IconPencil, IconTrash, IconCheck} from "./icons";
+import { TabKind } from "@/lib/types";
+import {
+  ContextMenu,
+  ContextMenuDelete,
+  ContextMenuItem,
+  ContextMenuSeparator,
+} from "@/components/ContextMenu";
+import InlineRename from "@/components/InlineRename";
+import {
+  IconBox,
+  IconChat,
+  IconImage,
+  IconClose,
+  IconMenu,
+  IconPlus,
+  IconPencil,
+} from "./icons";
 
 export default function TabBar({ onOpenNav }: { onOpenNav?: () => void }) {
   const tabs = useMimir((s) => s.tabs);
@@ -16,16 +32,17 @@ export default function TabBar({ onOpenNav }: { onOpenNav?: () => void }) {
   const renameTabRef = useMimir((s) => s.renameTabRef);
   const deleteConversation = useMimir((s) => s.deleteConversation);
   const deleteWorkspace = useMimir((s) => s.deleteWorkspace);
+  const deleteImageStudio = useMimir((s) => s.deleteImageStudio);
 
   const [dragId, setDragId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
   const [menu, setMenu] = useState<{ tabId: string; x: number; y: number } | null>(
     null
   );
 
-  function commitRename(tabId: string) {
-    renameTabRef(tabId, draft);
+  function commitRename(tabId: string, value: string) {
+    const next = value.trim();
+    if (next) renameTabRef(tabId, next);
     setEditingId(null);
   }
 
@@ -33,7 +50,6 @@ export default function TabBar({ onOpenNav }: { onOpenNav?: () => void }) {
     const tab = tabs.find((t) => t.id === tabId);
     if (!tab) return;
     setActiveTab(tabId);
-    setDraft(tab.title);
     setEditingId(tabId);
   }
 
@@ -90,16 +106,12 @@ export default function TabBar({ onOpenNav }: { onOpenNav?: () => void }) {
               ].join(" ")}
             />
             {editing ? (
-              <input
-                autoFocus
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onBlur={() => commitRename(tab.id)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") commitRename(tab.id);
-                  if (e.key === "Escape") setEditingId(null);
-                }}
-                onClick={(e) => e.stopPropagation()}
+              <InlineRename
+                value={tab.title}
+                onCommit={(v) => commitRename(tab.id, v)}
+                onCancel={() => setEditingId(null)}
+                selectOnFocus
+                ariaLabel={`Rename ${tab.title}`}
                 className="w-32 rounded border border-bronze-600 bg-ink-850 px-1 py-0 text-sm text-parchment-100 focus:outline-none"
               />
             ) : (
@@ -109,7 +121,6 @@ export default function TabBar({ onOpenNav }: { onOpenNav?: () => void }) {
                 onClick={(e) => {
                   if (active) {
                     e.stopPropagation();
-                    setDraft(tab.title);
                     setEditingId(tab.id);
                   }
                 }}
@@ -149,6 +160,7 @@ export default function TabBar({ onOpenNav }: { onOpenNav?: () => void }) {
             const tab = tabs.find((t) => t.id === menu.tabId);
             if (!tab) return;
             if (tab.kind === "chat") deleteConversation(tab.refId);
+            else if (tab.kind === "image") deleteImageStudio(tab.refId);
             else deleteWorkspace(tab.refId);
           }}
         />
@@ -157,23 +169,23 @@ export default function TabBar({ onOpenNav }: { onOpenNav?: () => void }) {
   );
 }
 
-/** Right-click menu for a tab. Rendered in a portal and clamped on-screen. */
+/** Right-click menu for a tab. */
 function TabContextMenu({
-                          x,
-                          y,
-                          tab,
-                          tabCount,
-                          isLast,
-                          onClose,
-                          onRename,
-                          onCloseTab,
-                          onCloseOthers,
-                          onCloseRight,
-                          onDelete,
-                        }: {
+  x,
+  y,
+  tab,
+  tabCount,
+  isLast,
+  onClose,
+  onRename,
+  onCloseTab,
+  onCloseOthers,
+  onCloseRight,
+  onDelete,
+}: {
   x: number;
   y: number;
-  tab: { kind: "chat" | "workspace" } | null;
+  tab: { kind: TabKind } | null;
   tabCount: number;
   isLast: boolean;
   onClose: () => void;
@@ -183,115 +195,54 @@ function TabContextMenu({
   onCloseRight: () => void;
   onDelete: () => void;
 }) {
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-
-  // Clamp so the menu never spills off the right or bottom edges.
-  useLayoutEffect(() => {
-    const el = menuRef.current;
-    const w = el?.offsetWidth ?? 200;
-    const h = el?.offsetHeight ?? 240;
-    const margin = 8;
-    const left = Math.max(margin, Math.min(x, window.innerWidth - w - margin));
-    const top = Math.max(margin, Math.min(y, window.innerHeight - h - margin));
-    setPos({ left, top });
-  }, [x, y]);
-
-  useEffect(() => {
-    function onDocPointer(e: PointerEvent) {
-      if (menuRef.current?.contains(e.target as Node)) return;
-      onClose();
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    document.addEventListener("pointerdown", onDocPointer);
-    document.addEventListener("keydown", onKey);
-    window.addEventListener("resize", onClose);
-    window.addEventListener("scroll", onClose, true);
-    return () => {
-      document.removeEventListener("pointerdown", onDocPointer);
-      document.removeEventListener("keydown", onKey);
-      window.removeEventListener("resize", onClose);
-      window.removeEventListener("scroll", onClose, true);
-    };
-  }, [onClose]);
-
-  if (typeof document === "undefined") return null;
 
   const run = (fn: () => void) => () => {
     fn();
     onClose();
   };
 
-  return createPortal(
-      <div
-          ref={menuRef}
-          role="menu"
-          style={{
-            position: "fixed",
-            left: pos?.left ?? x,
-            top: pos?.top ?? y,
-            visibility: pos ? "visible" : "hidden",
-          }}
-          className="z-[100] w-52 overflow-hidden rounded-lg border border-ink-700 bg-ink-900 py-1 shadow-[0_12px_32px_rgba(0,0,0,0.5)]"
-      >
-        <MenuItem
-            icon={<IconPencil className="h-4 w-4" />}
-            label="Rename"
-            onClick={run(onRename)}
-        />
-        <div className="my-1 h-px bg-ink-700" />
-        <MenuItem
-            icon={<IconClose className="h-4 w-4" />}
-            label="Close tab"
-            onClick={run(onCloseTab)}
-        />
-        <MenuItem
-            icon={<IconClose className="h-4 w-4" />}
-            label="Close other tabs"
-            disabled={tabCount <= 1}
-            onClick={run(onCloseOthers)}
-        />
-        <MenuItem
-            icon={<IconClose className="h-4 w-4" />}
-            label="Close tabs to the right"
-            disabled={isLast}
-            onClick={run(onCloseRight)}
-        />
-        <div className="my-1 h-px bg-ink-700" />
-
-        {confirmDelete ? (
-            <div className="flex pl-4 items-center gap-3 py-2">
-              <span className="text-xs font-medium text-signal-err">Delete permanently?</span>
-              <button
-                  onClick={() => { onDelete(); onClose(); }}
-                  className="rounded p-0.5 text-signal-err hover:bg-signal-err/20"
-                  title="Confirm delete"
-                  aria-label="Confirm delete"
-              >
-                <IconCheck className="h-4 w-4" />
-              </button>
-              <button
-                  onClick={() => setConfirmDelete(false)}
-                  className="rounded p-0.5 text-parchment-400 hover:bg-ink-700 hover:text-parchment-100"
-                  title="Cancel"
-                  aria-label="Cancel delete"
-              >
-              <IconClose className="h-4 w-4" />
-            </button>
-          </div>
-        ) : (
-            <MenuItem
-                icon={<IconTrash className="h-4 w-4" />}
-                label={tab?.kind === "workspace" ? "Delete workspace" : "Delete conversation"}
-                destructive
-                onClick={() => setConfirmDelete(true)}
-            />
-        )}
-      </div>,
-      document.body
+  return (
+    <ContextMenu x={x} y={y} width={208} onClose={onClose}>
+      <ContextMenuItem
+        icon={<IconPencil className="h-4 w-4" />}
+        label="Rename"
+        onClick={run(onRename)}
+      />
+      <ContextMenuSeparator />
+      <ContextMenuItem
+        icon={<IconClose className="h-4 w-4" />}
+        label="Close tab"
+        onClick={run(onCloseTab)}
+      />
+      <ContextMenuItem
+        icon={<IconClose className="h-4 w-4" />}
+        label="Close other tabs"
+        disabled={tabCount <= 1}
+        onClick={run(onCloseOthers)}
+      />
+      <ContextMenuItem
+        icon={<IconClose className="h-4 w-4" />}
+        label="Close tabs to the right"
+        disabled={isLast}
+        onClick={run(onCloseRight)}
+      />
+      <ContextMenuSeparator />
+      <ContextMenuDelete
+        label={
+          tab?.kind === "workspace"
+            ? "Delete workspace"
+            : tab?.kind === "image"
+              ? "Delete image studio"
+              : "Delete conversation"
+        }
+        confirmMessage="Delete permanently?"
+        armed={confirmDelete}
+        onArm={() => setConfirmDelete(true)}
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={run(onDelete)}
+      />
+    </ContextMenu>
   );
 }
 
@@ -299,6 +250,7 @@ function TabContextMenu({
 function NewTabButton() {
   const newConversation = useMimir((s) => s.newConversation);
   const newWorkspace = useMimir((s) => s.newWorkspace);
+  const newImageStudio = useMimir((s) => s.newImageStudio);
 
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState<{ left: number; top: number } | null>(null);
@@ -385,7 +337,7 @@ function NewTabButton() {
             style={{ position: "fixed", left: coords.left, top: coords.top }}
             className="z-[100] w-52 overflow-hidden rounded-lg border border-ink-700 bg-ink-900 py-1 shadow-[0_12px_32px_rgba(0,0,0,0.5)]"
           >
-            <MenuItem
+            <ContextMenuItem
               icon={<IconChat className="h-4 w-4" />}
               label="New conversation"
               onClick={() => {
@@ -393,7 +345,7 @@ function NewTabButton() {
                 setOpen(false);
               }}
             />
-            <MenuItem
+            <ContextMenuItem
               icon={<IconBox className="h-4 w-4" />}
               label="New workspace"
               onClick={() => {
@@ -401,52 +353,17 @@ function NewTabButton() {
                 setOpen(false);
               }}
             />
+            <ContextMenuItem
+              icon={<IconImage className="h-4 w-4" />}
+              label="New image studio"
+              onClick={() => {
+                newImageStudio();
+                setOpen(false);
+              }}
+            />
           </div>,
           document.body
         )}
     </div>
-  );
-}
-
-function MenuItem({
-  icon,
-  label,
-  onClick,
-  disabled,
-  destructive,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-  destructive?: boolean;
-}) {
-  return (
-    <button
-      role="menuitem"
-      onClick={onClick}
-      disabled={disabled}
-      className={[
-        "flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm transition-colors md:py-2",
-        disabled
-          ? "cursor-not-allowed text-parchment-600/40"
-          : destructive
-          ? "text-signal-err hover:bg-signal-err/10"
-          : "text-parchment-400 hover:bg-ink-800 hover:text-parchment-100",
-      ].join(" ")}
-    >
-      <span
-        className={
-          disabled
-            ? "text-parchment-600/40"
-            : destructive
-            ? "text-signal-err"
-            : "text-parchment-600"
-        }
-      >
-        {icon}
-      </span>
-      {label}
-    </button>
   );
 }

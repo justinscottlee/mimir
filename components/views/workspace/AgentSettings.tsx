@@ -94,7 +94,7 @@ export default function AgentSettings({
               <Num
                 value={agent.maxSteps}
                 min={1}
-                max={200}
+                max={1000}
                 disabled={disabled}
                 onChange={(n) => setConfig(workspaceId, { maxSteps: n })}
               />
@@ -104,7 +104,7 @@ export default function AgentSettings({
               <Num
                 value={agent.maxTokens}
                 min={512}
-                max={1048576}
+                max={104857600}
                 step={512}
                 disabled={disabled}
                 onChange={(n) => setConfig(workspaceId, { maxTokens: n })}

@@ -4,6 +4,7 @@ import { uid } from "../defaults";
 import {
   Conversation,
   Folder,
+  ImageStudio,
   ModelPrice,
   TabKind,
   Tag,
@@ -99,6 +100,11 @@ export const createOrganizationSlice: StateCreator<
       for (const [wid, w] of Object.entries(s.workspaces)) {
         workspaces[wid] = w.folderId === id ? { ...w, folderId: undefined } : w;
       }
+      const imageStudios: Record<string, ImageStudio> = {};
+      for (const [sid, st] of Object.entries(s.imageStudios)) {
+        imageStudios[sid] =
+          st.folderId === id ? { ...st, folderId: undefined } : st;
+      }
       return {
         settings: {
           ...s.settings,
@@ -106,6 +112,7 @@ export const createOrganizationSlice: StateCreator<
         },
         conversations,
         workspaces,
+        imageStudios,
       };
     }),
 
@@ -159,6 +166,11 @@ export const createOrganizationSlice: StateCreator<
         const next = strip(w.tagIds);
         workspaces[wid] = next === w.tagIds ? w : { ...w, tagIds: next };
       }
+      const imageStudios: Record<string, ImageStudio> = {};
+      for (const [sid, st] of Object.entries(s.imageStudios)) {
+        const next = strip(st.tagIds);
+        imageStudios[sid] = next === st.tagIds ? st : { ...st, tagIds: next };
+      }
       return {
         settings: {
           ...s.settings,
@@ -166,6 +178,7 @@ export const createOrganizationSlice: StateCreator<
         },
         conversations,
         workspaces,
+        imageStudios,
       };
     }),
 
@@ -177,6 +190,13 @@ export const createOrganizationSlice: StateCreator<
         if (!c) return s;
         return {
           conversations: { ...s.conversations, [id]: { ...c, folderId: fid } },
+        };
+      }
+      if (kind === "image") {
+        const st = s.imageStudios[id];
+        if (!st) return s;
+        return {
+          imageStudios: { ...s.imageStudios, [id]: { ...st, folderId: fid } },
         };
       }
       const w = s.workspaces[id];
@@ -202,6 +222,16 @@ export const createOrganizationSlice: StateCreator<
           },
         };
       }
+      if (kind === "image") {
+        const st = s.imageStudios[id];
+        if (!st) return s;
+        return {
+          imageStudios: {
+            ...s.imageStudios,
+            [id]: { ...st, tagIds: flip(st.tagIds) },
+          },
+        };
+      }
       const w = s.workspaces[id];
       if (!w) return s;
       return {
@@ -216,6 +246,13 @@ export const createOrganizationSlice: StateCreator<
         if (!c) return s;
         return {
           conversations: { ...s.conversations, [id]: { ...c, pinned } },
+        };
+      }
+      if (kind === "image") {
+        const st = s.imageStudios[id];
+        if (!st) return s;
+        return {
+          imageStudios: { ...s.imageStudios, [id]: { ...st, pinned } },
         };
       }
       const w = s.workspaces[id];

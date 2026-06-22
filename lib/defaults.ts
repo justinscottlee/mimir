@@ -1,6 +1,7 @@
 import {
   ContextManagementSettings,
   Endpoint,
+  ImageGenParams,
   Settings,
   SystemPrompt,
   ToolOutputLimits,
@@ -79,6 +80,29 @@ export const DEFAULT_AGENT_CONFIG: WorkspaceAgentConfig = {
 
 /** How many runs to keep per workspace before trimming the oldest. */
 export const MAX_WORKSPACE_RUNS = 25;
+
+/**
+ * Defaults for a new image studio's composer. A square 1024px is the common
+ * baseline; `steps`/`cfgScale` are sane Stable-Diffusion-ish defaults that a
+ * strict OpenAI endpoint simply ignores. `seed` is omitted so the first run is
+ * random until the user locks one.
+ */
+export const DEFAULT_IMAGE_PARAMS: ImageGenParams = {
+  prompt: "",
+  negativePrompt: "",
+  width: 1024,
+  height: 1024,
+  steps: 30,
+  cfgScale: 7,
+  batchSize: 1,
+};
+
+/**
+ * Cap on images kept per studio before the oldest are trimmed. Generated
+ * images are stored inline (base64) like workspace binary files, so this keeps
+ * a single studio's snapshot from growing without bound.
+ */
+export const MAX_STUDIO_IMAGES = 200;
 
 /** The endpoint every new account starts with. */
 export function defaultEndpoints(): Endpoint[] {

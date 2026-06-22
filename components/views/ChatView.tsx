@@ -6,6 +6,7 @@ import {
   EndpointLoad,
   loadAllModels,
   resolveEnabledModels,
+  modelsForModality,
   resolveModelKey,
   describeModelKey,
 } from "@/lib/models";
@@ -56,8 +57,13 @@ export default function ChatView({ conversationId }: { conversationId: string })
   const [editDraft, setEditDraft] = useState("");
 
   const models = useMemo(
-    () => resolveEnabledModels(loads, settings.disabledModels),
-    [loads, settings.disabledModels]
+    () =>
+      modelsForModality(
+        resolveEnabledModels(loads, settings.disabledModels),
+        settings.endpoints,
+        "text"
+      ),
+    [loads, settings.disabledModels, settings.endpoints]
   );
 
   const endpointsKey = settings.endpoints.map((e) => e.id + e.url).join("|");
@@ -464,10 +470,10 @@ export default function ChatView({ conversationId }: { conversationId: string })
 }
 
 function ModelSelect({
-  models,
-  value,
-  onChange,
-}: {
+                       models,
+                       value,
+                       onChange,
+                     }: {
   models: ResolvedModel[];
   value?: string;
   onChange: (key: string) => void;
@@ -494,19 +500,19 @@ function ModelSelect({
       >
         {groups.length === 1
           ? groups[0].items.map((m) => (
-              <option key={m.key} value={m.key}>
-                {m.modelId}
-              </option>
-            ))
+            <option key={m.key} value={m.key}>
+              {m.modelId}
+            </option>
+          ))
           : groups.map((g) => (
-              <optgroup key={g.name} label={g.name}>
-                {g.items.map((m) => (
-                  <option key={m.key} value={m.key}>
-                    {m.modelId}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
+            <optgroup key={g.name} label={g.name}>
+              {g.items.map((m) => (
+                <option key={m.key} value={m.key}>
+                  {m.modelId}
+                </option>
+              ))}
+            </optgroup>
+          ))}
       </select>
       {active && (
         <span className="hidden font-mono text-[10px] text-parchment-600 sm:inline">
@@ -689,9 +695,9 @@ function InterruptedTag({ standalone = false }: { standalone?: boolean }) {
 }
 
 function MetaLine({
-  meta,
-  modelKey,
-}: {
+                    meta,
+                    modelKey,
+                  }: {
   meta?: NonNullable<Message["meta"]>;
   modelKey?: string;
 }) {
@@ -718,11 +724,11 @@ function MetaLine({
 }
 
 function ActionButton({
-  label,
-  onClick,
-  children,
-  disabled,
-}: {
+                        label,
+                        onClick,
+                        children,
+                        disabled,
+                      }: {
   label: string;
   onClick: () => void;
   children: React.ReactNode;
@@ -748,15 +754,15 @@ function formatTokens(n: number): string {
 }
 
 function ChatInput({
-  streaming,
-  onSend,
-  onStop,
-  onResize,
-  webToolsAvailable,
-  webToolsOn,
-  onToggleWebTools,
-  onOpenTools,
-}: {
+                     streaming,
+                     onSend,
+                     onStop,
+                     onResize,
+                     webToolsAvailable,
+                     webToolsOn,
+                     onToggleWebTools,
+                     onOpenTools,
+                   }: {
   streaming: boolean;
   onSend: (text: string) => void;
   onStop: () => void;
@@ -851,11 +857,11 @@ function ChatInput({
  *   - web tools disabled globally                    → "off", click opens Tools
  */
 function WebToolsToggle({
-  available,
-  on,
-  onToggle,
-  onOpenTools,
-}: {
+                          available,
+                          on,
+                          onToggle,
+                          onOpenTools,
+                        }: {
   available: boolean;
   on: boolean;
   onToggle: () => void;
@@ -905,11 +911,11 @@ function WebToolsToggle({
 }
 
 function AssistantBody({
-  content,
-  isStreaming,
-  toolEvents,
-  thinkingMs,
-}: {
+                         content,
+                         isStreaming,
+                         toolEvents,
+                         thinkingMs,
+                       }: {
   content: string;
   isStreaming: boolean;
   toolEvents: ToolEventRecord[];
@@ -942,10 +948,10 @@ function AssistantBody({
 }
 
 function ThinkingPanel({
-  text,
-  live,
-  thinkingMs,
-}: {
+                         text,
+                         live,
+                         thinkingMs,
+                       }: {
   text: string;
   live: boolean;
   thinkingMs?: number;
@@ -1117,8 +1123,8 @@ function prunePct(p: { before: number; after: number }): number {
  * a summary, making it obvious that (and how much) context was reclaimed.
  */
 function CompactionChip({
-  compaction,
-}: {
+                          compaction,
+                        }: {
   compaction: { before: number; after: number };
 }) {
   const saved = Math.max(0, compaction.before - compaction.after);
@@ -1140,9 +1146,9 @@ function CompactionChip({
 }
 
 function ConfirmDeleteInline({
-  onConfirm,
-  message,
-}: {
+                               onConfirm,
+                               message,
+                             }: {
   onConfirm: () => void;
   message: string;
 }) {

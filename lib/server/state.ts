@@ -7,6 +7,8 @@ import {
   workspaces as wsT,
   workspaceFiles as wfT,
   workspaceRuns as wrT,
+  imageStudios as isT,
+  generatedImages as giT,
   memories as memT,
   skills as skillT,
   systemPrompts as spT,
@@ -19,6 +21,9 @@ import {
   AgentStep,
   Conversation,
   Folder,
+  GeneratedImage,
+  ImageGenParams,
+  ImageStudio,
   Memory,
   Message,
   MessageMeta,
@@ -39,6 +44,7 @@ import {
 import {
   DEFAULT_AGENT_CONFIG,
   DEFAULT_CONTEXT_MANAGEMENT,
+  DEFAULT_IMAGE_PARAMS,
   defaultPricing,
   defaultSettings,
   normalizeWindowKind,
@@ -82,6 +88,7 @@ async function ensureSeeded(userId: string, username: string): Promise<void> {
         disabledModels: s.disabledModels,
         defaultConversationModel: s.defaultConversationModel,
         defaultWorkspaceModel: s.defaultWorkspaceModel,
+        defaultImageModel: s.defaultImageModel,
         username: s.username,
         tools: s.tools,
         contextManagement: s.contextManagement,
@@ -164,6 +171,8 @@ async function readUserState(
     wsRows,
     wfRows,
     wrRows,
+    isRows,
+    giRows,
     memRows,
     skillRows,
     spRows,
@@ -189,6 +198,13 @@ async function readUserState(
       .innerJoin(wsT, eq(wrT.workspaceId, wsT.id))
       .where(eq(wsT.userId, userId))
       .orderBy(asc(wrT.seq)),
+    db.select().from(isT).where(eq(isT.userId, userId)),
+    db
+      .select({ g: giT })
+      .from(giT)
+      .innerJoin(isT, eq(giT.studioId, isT.id))
+      .where(eq(isT.userId, userId))
+      .orderBy(asc(giT.seq)),
     db.select().from(memT).where(eq(memT.userId, userId)),
     db.select().from(skillT).where(eq(skillT.userId, userId)),
     db.select().from(spT).where(eq(spT.userId, userId)),
@@ -281,6 +297,48 @@ async function readUserState(
     };
   }
 
+  // Group generated images under their studio, preserving seq order.
+  const imagesByStudio = new Map<string, GeneratedImage[]>();
+  for (const { g } of giRows) {
+    const meta = (g.meta as Partial<GeneratedImage> | null) ?? {};
+    const list = imagesByStudio.get(g.studioId) ?? [];
+    list.push({
+      id: g.id,
+      src: g.src,
+      favorite: g.favorite ?? false,
+      createdAt: ms(g.createdAt),
+      prompt: meta.prompt ?? "",
+      negativePrompt: meta.negativePrompt,
+      width: meta.width ?? 0,
+      height: meta.height ?? 0,
+      steps: meta.steps,
+      cfgScale: meta.cfgScale,
+      sampler: meta.sampler,
+      seed: meta.seed,
+      model: meta.model,
+      mimeType: meta.mimeType,
+      source: meta.source,
+      original: meta.original,
+    });
+    imagesByStudio.set(g.studioId, list);
+  }
+
+  const imageStudios: Record<string, ImageStudio> = {};
+  for (const s of isRows) {
+    imageStudios[s.id] = {
+      id: s.id,
+      title: s.title,
+      model: s.model ?? undefined,
+      params: (s.params as ImageGenParams | null) ?? { ...DEFAULT_IMAGE_PARAMS },
+      images: imagesByStudio.get(s.id) ?? [],
+      createdAt: ms(s.createdAt),
+      updatedAt: ms(s.updatedAt),
+      folderId: s.folderId ?? undefined,
+      tagIds: (s.tagIds as string[] | null) ?? [],
+      pinned: s.pinned ?? false,
+    };
+  }
+
   const memories: Record<string, Memory> = {};
   for (const m of memRows) {
     memories[m.id] = {
@@ -330,6 +388,7 @@ async function readUserState(
         disabledModels: (sRow.disabledModels as string[]) ?? [],
         defaultConversationModel: sRow.defaultConversationModel ?? undefined,
         defaultWorkspaceModel: sRow.defaultWorkspaceModel ?? undefined,
+        defaultImageModel: sRow.defaultImageModel ?? undefined,
         username: sRow.username,
         tools: sRow.tools as ToolSettings,
         contextManagement:
@@ -366,6 +425,7 @@ async function readUserState(
   return {
     conversations,
     workspaces,
+    imageStudios,
     memories,
     skills,
     systemPrompts,
@@ -545,6 +605,102 @@ export async function deleteWorkspace(
   await invalidateUserState(userId);
 }
 
+/**
+ * Upserts a whole image studio and replaces its image set in one transaction,
+ * the same guarded "replace the set" pattern as workspaces. Client-generated
+ * ids let images be deleted and re-inserted with fresh seq values matching
+ * gallery order; the per-image settings ride in `meta` jsonb.
+ */
+export async function upsertImageStudio(
+  userId: string,
+  studio: ImageStudio
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx
+      .insert(isT)
+      .values({
+        id: studio.id,
+        userId,
+        title: studio.title,
+        model: studio.model ?? null,
+        params: studio.params ?? null,
+        folderId: studio.folderId ?? null,
+        tagIds: studio.tagIds ?? [],
+        pinned: studio.pinned ?? false,
+        createdAt: toDate(studio.createdAt),
+        updatedAt: toDate(studio.updatedAt),
+      })
+      .onConflictDoUpdate({
+        target: isT.id,
+        set: {
+          title: studio.title,
+          model: studio.model ?? null,
+          params: studio.params ?? null,
+          folderId: studio.folderId ?? null,
+          tagIds: studio.tagIds ?? [],
+          pinned: studio.pinned ?? false,
+          updatedAt: toDate(studio.updatedAt),
+        },
+        // Only update rows owned by this user.
+        setWhere: eq(isT.userId, userId),
+      });
+
+    // Confirm ownership before touching child rows (mirrors upsertWorkspace):
+    // if this id already belonged to someone else, the guarded upsert changed
+    // nothing and this read sees their id — abort so we never replace it.
+    const owner = await tx
+      .select({ userId: isT.userId })
+      .from(isT)
+      .where(eq(isT.id, studio.id))
+      .limit(1);
+    if (!owner[0] || owner[0].userId !== userId) {
+      throw new Error("Image studio not found or not owned by user.");
+    }
+
+    // Replace the gallery, re-seqing to array order.
+    await tx.delete(giT).where(eq(giT.studioId, studio.id));
+    if (studio.images.length > 0) {
+      await tx.insert(giT).values(
+        studio.images.map((img, i) => ({
+          id: img.id,
+          studioId: studio.id,
+          seq: i,
+          src: img.src,
+          favorite: img.favorite ?? false,
+          meta: {
+            prompt: img.prompt,
+            negativePrompt: img.negativePrompt,
+            width: img.width,
+            height: img.height,
+            steps: img.steps,
+            cfgScale: img.cfgScale,
+            sampler: img.sampler,
+            seed: img.seed,
+            model: img.model,
+            mimeType: img.mimeType,
+            source: img.source,
+            original: img.original,
+          },
+          createdAt: toDate(img.createdAt),
+        }))
+      );
+    }
+  });
+  await invalidateUserState(userId);
+}
+
+export async function deleteImageStudios(
+  userId: string,
+  ids: string[]
+): Promise<void> {
+  if (ids.length === 0) return;
+  // FK cascade removes the studio's images. Scope to the user's own rows.
+  await db
+    .delete(isT)
+    .where(and(eq(isT.userId, userId), inArray(isT.id, ids)));
+  await invalidateUserState(userId);
+}
+
 /** Whether a workspace exists and belongs to the given user. */
 export async function userOwnsWorkspace(
   userId: string,
@@ -706,6 +862,7 @@ export async function saveSettings(
       disabledModels: settings.disabledModels,
       defaultConversationModel: settings.defaultConversationModel ?? null,
       defaultWorkspaceModel: settings.defaultWorkspaceModel ?? null,
+      defaultImageModel: settings.defaultImageModel ?? null,
       username: settings.username,
       tools: settings.tools,
       contextManagement: settings.contextManagement,
@@ -721,6 +878,7 @@ export async function saveSettings(
         disabledModels: settings.disabledModels,
         defaultConversationModel: settings.defaultConversationModel ?? null,
         defaultWorkspaceModel: settings.defaultWorkspaceModel ?? null,
+        defaultImageModel: settings.defaultImageModel ?? null,
         username: settings.username,
         tools: settings.tools,
         contextManagement: settings.contextManagement,

@@ -46,6 +46,13 @@ export const IconBox = (p: IconProps) => (
         <path d="M2.5 5 8 7.5 13.5 5M8 7.5v6" />
     </Svg>
 );
+export const IconImage = (p: IconProps) => (
+    <Svg {...p}>
+        <rect x="2" y="3" width="12" height="10" rx="1.5" />
+        <circle cx="5.75" cy="6.25" r="1.1" />
+        <path d="M2.5 11.5 6 8l2 2 2.5-2.5L13.5 10" />
+    </Svg>
+);
 export const IconSearch = (p: IconProps) => (
     <Svg {...p}>
         <circle cx="6.87" cy="6.87" r="5" />
@@ -256,5 +263,38 @@ export const IconCoin = (p: IconProps) => (
     <Svg {...p}>
         <circle cx="8" cy="8" r="5.33" />
         <path d="M8 5.33V10.67M9.67 6.5C9.67 5.7 8.9 5.33 8 5.33C7.1 5.33 6.33 5.7 6.33 6.5C6.33 8.3 9.67 7.5 9.67 9.5C9.67 10.3 8.9 10.67 8 10.67C7.1 10.67 6.33 10.3 6.33 9.5" />
+    </Svg>
+);
+export const IconResize = (p: IconProps) => (
+    <Svg {...p}>
+        <path d="M9.33 2.67H13.33V6.67M13.33 2.67L9 7M6.67 13.33H2.67V9.33M2.67 13.33L7 9" />
+    </Svg>
+);
+export const IconLayers = (p: IconProps) => (
+    <Svg {...p}>
+        <path d="M8 1.67 1.67 5 8 8.33 14.33 5 8 1.67Z" />
+        <path d="M1.67 11 8 14.33 14.33 11M1.67 8 8 11.33 14.33 8" />
+    </Svg>
+);
+export const IconRevert = (p: IconProps) => (
+    <Svg {...p}>
+        <path d="M3.5 8a4.5 4.5 0 1 1 1.4 3.26" />
+        <path d="M3.13 4.67V8H6.47" />
+    </Svg>
+);
+export const IconSquare = (p: IconProps) => (
+    <Svg {...p}>
+        <rect x="2.67" y="2.67" width="10.67" height="10.67" rx="2" />
+    </Svg>
+);
+export const IconCheckSquare = (p: IconProps) => (
+    <Svg {...p}>
+        <path d="M5.67 8 7.33 9.67 10.67 6.33" />
+        <rect x="2.67" y="2.67" width="10.67" height="10.67" rx="2" />
+    </Svg>
+);
+export const IconSort = (p: IconProps) => (
+    <Svg {...p}>
+        <path d="M4 3.33V12.67M4 12.67 2 10.67M4 12.67 6 10.67M10.67 4.67H14M10.67 8H13.33M10.67 11.33H12" />
     </Svg>
 );

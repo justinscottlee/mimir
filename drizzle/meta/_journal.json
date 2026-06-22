@@ -36,6 +36,20 @@
       "when": 1781815880267,
       "tag": "0004_organization_binary_pricing",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1781925983593,
+      "tag": "0005_military_midnight",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1782146841287,
+      "tag": "0006_fancy_dark_phoenix",
+      "breakpoints": true
     }
   ]
 }

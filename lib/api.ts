@@ -2,6 +2,7 @@
 
 import {
   Conversation,
+  ImageStudio,
   Memory,
   SandboxStatus,
   Settings,
@@ -122,6 +123,13 @@ export const api = {
       ptyId,
       files,
     }) as Promise<{ files: WorkspaceFile[]; skipped?: string[] }>,
+
+  putImageStudio: (s: ImageStudio) =>
+    req("PUT", `/api/image-studios/${encodeURIComponent(s.id)}`, s),
+  deleteImageStudio: (id: string) =>
+    req("DELETE", `/api/image-studios/${encodeURIComponent(id)}`),
+  deleteImageStudiosBatch: (ids: string[]) =>
+    req("POST", `/api/image-studios/delete-batch`, { ids }),
 
   putMemory: (m: Memory) =>
     req("PUT", `/api/memories/${encodeURIComponent(m.id)}`, m),

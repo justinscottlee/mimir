@@ -235,6 +235,73 @@ export const workspaceRuns = pgTable(
   })
 );
 
+/**
+ * One image studio. The composer parameters (prompt, size, steps, …) ride as
+ * jsonb so the ImageGenParams shape in lib/types.ts stays the source of truth.
+ * Generated images live in `generated_images`, linked by studioId.
+ */
+export const imageStudios = pgTable(
+  "image_studios",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    model: text("model"),
+    /** ImageGenParams — current composer settings. */
+    params: jsonb("params"),
+    /** Library organization: parent folder, color tags, pin state. */
+    folderId: text("folder_id"),
+    tagIds: jsonb("tag_ids").notNull().default([]),
+    pinned: boolean("pinned").notNull().default(false),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index("image_studios_user_id_idx").on(t.userId),
+    userUpdatedIdx: index("image_studios_user_updated_idx").on(
+      t.userId,
+      t.updatedAt
+    ),
+  })
+);
+
+/**
+ * One generated image. `src` is a render-ready data URI (base64) or URL —
+ * stored as text the same way workspace files hold base64 binary. The settings
+ * that produced it ride in `meta` jsonb. The full set is replaced wholesale on
+ * each studio upsert (same "replace the set" pattern as messages), so `seq`
+ * preserves gallery order.
+ */
+export const generatedImages = pgTable(
+  "generated_images",
+  {
+    id: text("id").primaryKey(),
+    studioId: text("studio_id")
+      .notNull()
+      .references(() => imageStudios.id, { onDelete: "cascade" }),
+    seq: integer("seq").notNull(),
+    src: text("src").notNull(),
+    favorite: boolean("favorite").notNull().default(false),
+    /**
+     * The GeneratedImage fields other than id/src/favorite/createdAt: prompt,
+     * negativePrompt, width, height, steps, cfgScale, sampler, seed, model,
+     * mimeType, source ("generated" | "upload"), and `original` (the pristine
+     * pre-edit version captured on the first resize/upscale).
+     */
+    meta: jsonb("meta"),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => ({
+    studioIdx: index("generated_images_studio_id_idx").on(t.studioId),
+    studioSeqIdx: uniqueIndex("generated_images_studio_seq_idx").on(
+      t.studioId,
+      t.seq
+    ),
+  })
+);
+
 export const memories = pgTable(
   "memories",
   {
@@ -312,17 +379,12 @@ export const settings = pgTable("settings", {
   disabledModels: jsonb("disabled_models").notNull().default([]),
   defaultConversationModel: text("default_conversation_model"),
   defaultWorkspaceModel: text("default_workspace_model"),
+  defaultImageModel: text("default_image_model"),
   username: text("username").notNull().default("admin"),
   /** ToolSettings */
   tools: jsonb("tools").notNull(),
   /** ContextManagementSettings (tool pruning + summarization). */
   contextManagement: jsonb("context_management"),
-  /**
-   * @deprecated No longer read or written. read_file / run_command output caps
-   * are now a fixed internal constant (DEFAULT_TOOL_OUTPUT_LIMITS), not a
-   * per-user setting. Column kept (nullable) to avoid a destructive migration.
-   */
-  toolOutput: jsonb("tool_output"),
   /** Folder[] — Library folder definitions. */
   folders: jsonb("folders").notNull().default([]),
   /** Tag[] — color-coded tag definitions. */

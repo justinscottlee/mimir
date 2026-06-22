@@ -1,17 +1,19 @@
 "use client";
 
-import {
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import { createPortal } from "react-dom";
+import { useMemo, useState } from "react";
 import { useMimir } from "@/lib/store";
 import { describeModelKey } from "@/lib/models";
 import { Folder, TabKind, Tag, TAG_COLORS, TagColor } from "@/lib/types";
 import { tagStyle } from "@/lib/tagColors";
+import {
+  ContextMenu,
+  ContextMenuDelete,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuSeparator,
+  useContextMenu,
+} from "@/components/ContextMenu";
+import InlineRename from "@/components/InlineRename";
 import * as Icons from "../icons";
 import ConfirmDelete from "../ConfirmDelete";
 
@@ -36,29 +38,52 @@ interface LibItem {
   haystack: string;
 }
 
-type TypeFilter = "all" | "chat" | "workspace";
+type TypeFilter = "all" | "chat" | "workspace" | "image";
+
+/** How the list is ordered (pinned items always float to the top). */
+type SortKey = "recent" | "oldest" | "name-asc" | "name-desc";
+
+const SORT_LABELS: Record<SortKey, string> = {
+  recent: "Recently updated",
+  oldest: "Oldest first",
+  "name-asc": "Name (A–Z)",
+  "name-desc": "Name (Z–A)",
+};
+
+/** Stable selection key for a library item. */
+function itemKey(it: { kind: TabKind; id: string }): string {
+  return `${it.kind}:${it.id}`;
+}
 
 export default function LibraryView() {
   const conversations = useMimir((s) => s.conversations);
   const workspaces = useMimir((s) => s.workspaces);
+  const imageStudios = useMimir((s) => s.imageStudios);
   const settings = useMimir((s) => s.settings);
   const folders = settings.folders;
   const tags = settings.tags;
 
   const openConversation = useMimir((s) => s.openConversation);
   const openWorkspace = useMimir((s) => s.openWorkspace);
+  const openImageStudio = useMimir((s) => s.openImageStudio);
   const deleteConversation = useMimir((s) => s.deleteConversation);
   const deleteWorkspace = useMimir((s) => s.deleteWorkspace);
+  const deleteImageStudio = useMimir((s) => s.deleteImageStudio);
   const newConversation = useMimir((s) => s.newConversation);
   const newWorkspace = useMimir((s) => s.newWorkspace);
+  const newImageStudio = useMimir((s) => s.newImageStudio);
   const closeWindowByKind = useMimir((s) => s.closeWindowByKind);
   const setConversationTitle = useMimir((s) => s.setConversationTitle);
   const setWorkspaceName = useMimir((s) => s.setWorkspaceName);
+  const setImageStudioTitle = useMimir((s) => s.setImageStudioTitle);
 
   const addFolder = useMimir((s) => s.addFolder);
   const deleteFolder = useMimir((s) => s.deleteFolder);
   const setItemFolder = useMimir((s) => s.setItemFolder);
   const setItemPinned = useMimir((s) => s.setItemPinned);
+  const toggleItemTag = useMimir((s) => s.toggleItemTag);
+  const deleteConversations = useMimir((s) => s.deleteConversations);
+  const deleteImageStudios = useMimir((s) => s.deleteImageStudios);
 
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
@@ -66,6 +91,10 @@ export default function LibraryView() {
   const [tagFilter, setTagFilter] = useState<Set<string>>(new Set());
   const [managingTags, setManagingTags] = useState(false);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
+  const [sortKey, setSortKey] = useState<SortKey>("recent");
+  // Multi-select for bulk tag/move/delete.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   // Build the unified item list once per data change.
   const items = useMemo<LibItem[]>(() => {
@@ -115,8 +144,31 @@ export default function LibraryView() {
         ).toLowerCase(),
       });
     }
+    for (const st of Object.values(imageStudios)) {
+      out.push({
+        kind: "image",
+        id: st.id,
+        title: st.title,
+        sortAt: st.updatedAt,
+        subtitle: `${st.images.length} image${
+          st.images.length === 1 ? "" : "s"
+        }${
+          st.model ? ` · ${describeModelKey(st.model, settings)}` : ""
+        } · ${new Date(st.updatedAt).toLocaleDateString()}`,
+        folderId: st.folderId,
+        tagIds: st.tagIds ?? [],
+        pinned: st.pinned ?? false,
+        haystack: (
+          st.title +
+          " " +
+          (st.params?.prompt ?? "") +
+          " " +
+          st.images.map((img) => img.prompt).join(" ")
+        ).toLowerCase(),
+      });
+    }
     return out;
-  }, [conversations, workspaces, settings]);
+  }, [conversations, workspaces, imageStudios, settings]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -134,10 +186,21 @@ export default function LibraryView() {
         return true;
       })
       .sort((a, b) => {
+        // Pinned items always float to the top, regardless of sort.
         if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-        return b.sortAt - a.sortAt;
+        switch (sortKey) {
+          case "oldest":
+            return a.sortAt - b.sortAt;
+          case "name-asc":
+            return a.title.localeCompare(b.title);
+          case "name-desc":
+            return b.title.localeCompare(a.title);
+          case "recent":
+          default:
+            return b.sortAt - a.sortAt;
+        }
       });
-  }, [items, query, typeFilter, folderFilter, tagFilter]);
+  }, [items, query, typeFilter, folderFilter, tagFilter, sortKey]);
 
   // Per-folder counts for the left rail.
   const counts = useMemo(() => {
@@ -152,6 +215,7 @@ export default function LibraryView() {
 
   function open(it: LibItem) {
     if (it.kind === "chat") openConversation(it.id);
+    else if (it.kind === "image") openImageStudio(it.id);
     else openWorkspace(it.id);
     closeWindowByKind("library");
   }
@@ -163,6 +227,65 @@ export default function LibraryView() {
       else next.add(id);
       return next;
     });
+  }
+
+  // ---- Selection + bulk actions ----------------------------------------
+
+  // The selected items currently visible (selection survives nothing that
+  // isn't on screen, so bulk ops only ever touch what the user can see).
+  const selectedItems = useMemo(
+    () => filtered.filter((it) => selected.has(itemKey(it))),
+    [filtered, selected]
+  );
+  const allVisibleSelected =
+    filtered.length > 0 && selectedItems.length === filtered.length;
+
+  function toggleSelect(it: LibItem) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const k = itemKey(it);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      return next;
+    });
+  }
+  function exitSelectMode() {
+    setSelectMode(false);
+    setSelected(new Set());
+  }
+  function selectAllVisible() {
+    if (allVisibleSelected) setSelected(new Set());
+    else setSelected(new Set(filtered.map(itemKey)));
+  }
+
+  /** Apply a mutation to every selected item, then clear the selection. */
+  function bulkPin(pinned: boolean) {
+    for (const it of selectedItems) setItemPinned(it.kind, it.id, pinned);
+  }
+  function bulkMoveFolder(folderId: string | null) {
+    for (const it of selectedItems) setItemFolder(it.kind, it.id, folderId);
+  }
+  /**
+   * Toggle a tag across the selection as a group: if every selected item
+   * already has the tag, remove it from all; otherwise add it to those missing
+   * it. (toggleItemTag flips per item, so we only call it where it'll move in
+   * the intended direction.)
+   */
+  function bulkToggleTag(tagId: string) {
+    const allHave = selectedItems.every((it) => it.tagIds.includes(tagId));
+    for (const it of selectedItems) {
+      const has = it.tagIds.includes(tagId);
+      if (allHave ? has : !has) toggleItemTag(it.kind, it.id, tagId);
+    }
+  }
+  function bulkDelete() {
+    const chatIds = selectedItems.filter((i) => i.kind === "chat").map((i) => i.id);
+    const imageIds = selectedItems.filter((i) => i.kind === "image").map((i) => i.id);
+    const wsIds = selectedItems.filter((i) => i.kind === "workspace").map((i) => i.id);
+    if (chatIds.length) deleteConversations(chatIds);
+    if (imageIds.length) deleteImageStudios(imageIds);
+    for (const id of wsIds) deleteWorkspace(id);
+    exitSelectMode();
   }
 
   const empty = items.length === 0;
@@ -237,7 +360,7 @@ export default function LibraryView() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search chats & workspaces…"
+              placeholder="Search chats, workspaces & images…"
               className="flex-1 bg-transparent text-base text-parchment-100 placeholder:text-parchment-600 focus:outline-none md:text-sm"
             />
             {query && (
@@ -268,24 +391,44 @@ export default function LibraryView() {
               active={typeFilter === "workspace"}
               onClick={() => setTypeFilter("workspace")}
             />
+            <SegBtn
+              label="Images"
+              icon={<Icons.IconImage className="h-3.5 w-3.5" />}
+              active={typeFilter === "image"}
+              onClick={() => setTypeFilter("image")}
+            />
+          </div>
+
+          {/* Sort + multi-select */}
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-1.5 text-[11px] text-parchment-600">
+              <Icons.IconSort className="h-3.5 w-3.5" />
+              <span className="sr-only">Sort by</span>
+              <select
+                value={sortKey}
+                onChange={(e) => setSortKey(e.target.value as SortKey)}
+                className="rounded-md border border-ink-700 bg-ink-850 px-2 py-1 text-xs text-parchment-200 focus:border-bronze-600 focus:outline-none"
+              >
+                {(Object.keys(SORT_LABELS) as SortKey[]).map((k) => (
+                  <option key={k} value={k}>
+                    {SORT_LABELS[k]}
+                  </option>
+                ))}
+              </select>
+            </label>
             <div className="flex-1" />
             <button
-              onClick={() => {
-                newConversation();
-                closeWindowByKind("library");
-              }}
-              className="flex items-center gap-1 rounded-md border border-ink-700 px-2 py-1 text-xs text-parchment-400 transition-colors hover:bg-ink-800 hover:text-parchment-100"
+              onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
+              className={[
+                "flex items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors",
+                selectMode
+                  ? "border-bronze-500 bg-bronze-500/15 text-bronze-200"
+                  : "border-ink-700 text-parchment-400 hover:bg-ink-800 hover:text-parchment-100",
+              ].join(" ")}
             >
-              <Icons.IconChat className="h-3.5 w-3.5" /> New chat
-            </button>
-            <button
-              onClick={() => {
-                newWorkspace();
-                closeWindowByKind("library");
-              }}
-              className="flex items-center gap-1 rounded-md border border-ink-700 px-2 py-1 text-xs text-parchment-400 transition-colors hover:bg-ink-800 hover:text-parchment-100"
-            >
-              <Icons.IconBox className="h-3.5 w-3.5" /> New workspace
+
+              <Icons.IconCheckSquare className="h-4 w-4" />
+              {selectMode ? "Done" : "Select"}
             </button>
           </div>
 
@@ -326,9 +469,9 @@ export default function LibraryView() {
           {empty ? (
             <div className="rounded-lg border border-dashed border-ink-700 p-8 text-center">
               <p className="text-sm text-parchment-600">
-                Nothing here yet — start a chat or a workspace.
+                Nothing here yet — start a chat, a workspace, or an image.
               </p>
-              <div className="mt-4 flex justify-center gap-2">
+              <div className="mt-4 flex flex-wrap justify-center gap-2">
                 <button
                   onClick={() => {
                     newConversation();
@@ -347,6 +490,15 @@ export default function LibraryView() {
                 >
                   New workspace
                 </button>
+                <button
+                  onClick={() => {
+                    newImageStudio();
+                    closeWindowByKind("library");
+                  }}
+                  className="rounded-md border border-ink-700 px-4 py-2 text-sm font-medium text-parchment-200 hover:bg-ink-800"
+                >
+                  New image studio
+                </button>
               </div>
             </div>
           ) : filtered.length === 0 ? (
@@ -354,31 +506,55 @@ export default function LibraryView() {
               Nothing matches your filters.
             </div>
           ) : (
-            <ul className="divide-y divide-ink-700 overflow-hidden rounded-lg border border-ink-700">
-              {filtered.map((it) => (
-                <ItemRow
-                  key={`${it.kind}:${it.id}`}
-                  item={it}
+            <>
+              {selectMode && (
+                <BulkActionBar
+                  count={selectedItems.length}
+                  allSelected={allVisibleSelected}
                   folders={folders}
                   tags={tags}
-                  onOpen={() => open(it)}
-                  onTogglePin={() =>
-                    setItemPinned(it.kind, it.id, !it.pinned)
-                  }
-                  onMoveFolder={(fid) => setItemFolder(it.kind, it.id, fid)}
-                  onRename={(title) =>
-                    it.kind === "chat"
-                      ? setConversationTitle(it.id, title)
-                      : setWorkspaceName(it.id, title)
-                  }
-                  onDelete={() =>
-                    it.kind === "chat"
-                      ? deleteConversation(it.id)
-                      : deleteWorkspace(it.id)
-                  }
+                  selectedItems={selectedItems}
+                  onSelectAll={selectAllVisible}
+                  onPin={() => bulkPin(true)}
+                  onUnpin={() => bulkPin(false)}
+                  onMoveFolder={bulkMoveFolder}
+                  onToggleTag={bulkToggleTag}
+                  onDelete={bulkDelete}
                 />
-              ))}
-            </ul>
+              )}
+              <ul className="divide-y divide-ink-700 overflow-hidden rounded-lg border border-ink-700">
+                {filtered.map((it) => (
+                  <ItemRow
+                    key={`${it.kind}:${it.id}`}
+                    item={it}
+                    folders={folders}
+                    tags={tags}
+                    selectMode={selectMode}
+                    selected={selected.has(itemKey(it))}
+                    onToggleSelect={() => toggleSelect(it)}
+                    onOpen={() => open(it)}
+                    onTogglePin={() =>
+                      setItemPinned(it.kind, it.id, !it.pinned)
+                    }
+                    onMoveFolder={(fid) => setItemFolder(it.kind, it.id, fid)}
+                    onRename={(title) =>
+                      it.kind === "chat"
+                        ? setConversationTitle(it.id, title)
+                        : it.kind === "image"
+                        ? setImageStudioTitle(it.id, title)
+                        : setWorkspaceName(it.id, title)
+                    }
+                    onDelete={() =>
+                      it.kind === "chat"
+                        ? deleteConversation(it.id)
+                        : it.kind === "image"
+                        ? deleteImageStudio(it.id)
+                        : deleteWorkspace(it.id)
+                    }
+                  />
+                ))}
+              </ul>
+            </>
           )}
         </div>
       </div>
@@ -566,10 +742,213 @@ function ColorPicker({
 
 /* -------------------------------- item row ------------------------------- */
 
+/** Icon for a library item's kind (chat / workspace / image). */
+function kindIcon(kind: TabKind, className = "h-4 w-4") {
+  if (kind === "chat") return <Icons.IconChat className={className} />;
+  if (kind === "image") return <Icons.IconImage className={className} />;
+  return <Icons.IconBox className={className} />;
+}
+
+/** Capitalized noun for a kind, used in row labels and confirm prompts. */
+function kindNoun(kind: TabKind): "Chat" | "Workspace" | "Image" {
+  if (kind === "chat") return "Chat";
+  if (kind === "image") return "Image";
+  return "Workspace";
+}
+
+/** Type-badge color classes per kind. */
+function kindBadgeClass(kind: TabKind): string {
+  if (kind === "chat") return "border-blue-500/40 bg-blue-500/10 text-blue-300";
+  if (kind === "image")
+    return "border-teal-500/40 bg-teal-500/10 text-teal-300";
+  return "border-bronze-600/50 bg-bronze-600/15 text-bronze-300";
+}
+
+function BulkActionBar({
+  count,
+  allSelected,
+  folders,
+  tags,
+  selectedItems,
+  onSelectAll,
+  onPin,
+  onUnpin,
+  onMoveFolder,
+  onToggleTag,
+  onDelete,
+}: {
+  count: number;
+  allSelected: boolean;
+  folders: Folder[];
+  tags: Tag[];
+  selectedItems: LibItem[];
+  onSelectAll: () => void;
+  onPin: () => void;
+  onUnpin: () => void;
+  onMoveFolder: (folderId: string | null) => void;
+  onToggleTag: (tagId: string) => void;
+  onDelete: () => void;
+}) {
+  const folderMenu = useContextMenu();
+  const tagMenu = useContextMenu();
+  const none = count === 0;
+
+  // For the tag picker: how many of the selected items carry each tag, so the
+  // row can show fully-applied (✓) vs partially-applied (–).
+  const tagState = (tagId: string): "none" | "some" | "all" => {
+    const n = selectedItems.filter((it) => it.tagIds.includes(tagId)).length;
+    if (n === 0) return "none";
+    return n === count ? "all" : "some";
+  };
+
+  const openFrom = (
+    e: React.MouseEvent,
+    open: (rect: DOMRect, data: undefined) => void
+  ) => {
+    open((e.currentTarget as HTMLElement).getBoundingClientRect(), undefined);
+  };
+
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-bronze-500/40 bg-bronze-500/10 px-3 py-2">
+      <button
+        onClick={onSelectAll}
+        className="flex items-center gap-1.5 text-xs font-medium text-bronze-100 hover:text-white"
+      >
+        {allSelected ? (
+          <Icons.IconCheckSquare className="h-4 w-4" />
+        ) : (
+          <Icons.IconSquare className="h-4 w-4" />
+        )}
+        {allSelected ? "Clear" : "All"}
+      </button>
+      <span className="text-xs text-parchment-300">{count} selected</span>
+
+      <div className="flex-1" />
+
+      <BulkBtn disabled={none} onClick={onPin} icon={<Icons.IconPin className="h-3.5 w-3.5" />}>
+        Pin
+      </BulkBtn>
+      <BulkBtn disabled={none} onClick={onUnpin} icon={<Icons.IconPin className="h-3.5 w-3.5" />}>
+        Unpin
+      </BulkBtn>
+      <BulkBtn
+        disabled={none}
+        onClick={(e) => openFrom(e, folderMenu.openMenuAt)}
+        icon={<Icons.IconFolder className="h-3.5 w-3.5" />}
+      >
+        Move
+      </BulkBtn>
+      <BulkBtn
+        disabled={none || tags.length === 0}
+        onClick={(e) => openFrom(e, tagMenu.openMenuAt)}
+        icon={<Icons.IconTag className="h-3.5 w-3.5" />}
+      >
+        Tag
+      </BulkBtn>
+      <ConfirmDelete
+        label={`Delete ${count} item${count === 1 ? "" : "s"}`}
+        message={`Delete ${count}?`}
+        onConfirm={onDelete}
+      />
+
+      {folderMenu.menu && (
+        <ContextMenu
+          x={folderMenu.menu.x}
+          y={folderMenu.menu.y}
+          width={220}
+          onClose={folderMenu.closeMenu}
+        >
+          <ContextMenuLabel>Move {count} to folder</ContextMenuLabel>
+          <ContextMenuItem
+            icon={<Icons.IconFile className="h-4 w-4" />}
+            label="Top level (unfiled)"
+            onClick={() => {
+              onMoveFolder(null);
+              folderMenu.closeMenu();
+            }}
+          />
+          {folders.map((f) => (
+            <ContextMenuItem
+              key={f.id}
+              icon={
+                <Icons.IconFolder className="h-4 w-4" style={tagStyle(f.color).text} />
+              }
+              label={f.name}
+              onClick={() => {
+                onMoveFolder(f.id);
+                folderMenu.closeMenu();
+              }}
+            />
+          ))}
+        </ContextMenu>
+      )}
+
+      {tagMenu.menu && (
+        <ContextMenu
+          x={tagMenu.menu.x}
+          y={tagMenu.menu.y}
+          width={220}
+          onClose={tagMenu.closeMenu}
+        >
+          <ContextMenuLabel>Tag {count} items</ContextMenuLabel>
+          {tags.map((t) => {
+            const state = tagState(t.id);
+            const c = tagStyle(t.color);
+            return (
+              <button
+                key={t.id}
+                role="menuitemcheckbox"
+                aria-checked={state === "all"}
+                onClick={() => onToggleTag(t.id)}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-parchment-300 transition-colors hover:bg-ink-800"
+              >
+                <span className="h-2 w-2 rounded-full" style={c.dot} />
+                <span className="flex-1 truncate">{t.label}</span>
+                {state === "all" && (
+                  <Icons.IconCheck className="h-4 w-4 text-bronze-300" />
+                )}
+                {state === "some" && (
+                  <span className="text-xs text-parchment-600">–</span>
+                )}
+              </button>
+            );
+          })}
+        </ContextMenu>
+      )}
+    </div>
+  );
+}
+
+function BulkBtn({
+  onClick,
+  disabled,
+  icon,
+  children,
+}: {
+  onClick: (e: React.MouseEvent) => void;
+  disabled?: boolean;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="flex items-center gap-1 rounded-md border border-ink-700 bg-ink-900/60 px-2 py-1 text-xs text-parchment-300 transition-colors hover:bg-ink-800 hover:text-parchment-100 disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      {icon}
+      {children}
+    </button>
+  );
+}
+
 function ItemRow({
   item,
   folders,
   tags,
+  selectMode,
+  selected,
+  onToggleSelect,
   onOpen,
   onTogglePin,
   onMoveFolder,
@@ -579,6 +958,9 @@ function ItemRow({
   item: LibItem;
   folders: Folder[];
   tags: Tag[];
+  selectMode: boolean;
+  selected: boolean;
+  onToggleSelect: () => void;
   onOpen: () => void;
   onTogglePin: () => void;
   onMoveFolder: (folderId: string | null) => void;
@@ -588,43 +970,66 @@ function ItemRow({
   const toggleItemTag = useMimir((s) => s.toggleItemTag);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState(false);
-  const [draft, setDraft] = useState(item.title);
   const itemTags = tags.filter((t) => item.tagIds.includes(t.id));
 
   function beginRename() {
-    setDraft(item.title);
     setRenaming(true);
   }
-  function commitRename() {
-    const t = draft.trim();
+  function commitRename(value: string) {
+    const t = value.trim();
     if (t && t !== item.title) onRename(t);
     setRenaming(false);
   }
 
+  // In select mode, clicking the row toggles selection instead of opening.
+  const onRowClick = () => {
+    if (renaming) return;
+    if (selectMode) onToggleSelect();
+    else onOpen();
+  };
+
   return (
     <li
-      className="group flex cursor-pointer items-center gap-3 bg-ink-900 px-4 py-3 transition-colors hover:bg-ink-850"
-      onClick={() => !renaming && onOpen()}
+      className={[
+        "group flex cursor-pointer items-center gap-3 px-4 py-3 transition-colors",
+        selected ? "bg-bronze-500/10 hover:bg-bronze-500/15" : "bg-ink-900 hover:bg-ink-850",
+      ].join(" ")}
+      onClick={onRowClick}
       onContextMenu={(e) => {
         e.preventDefault();
         setMenu({ x: e.clientX, y: e.clientY });
       }}
     >
+      {selectMode && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleSelect();
+          }}
+          aria-label={selected ? "Deselect" : "Select"}
+          aria-pressed={selected}
+          className={[
+            "shrink-0 rounded transition-colors",
+            selected ? "text-bronze-300" : "text-parchment-600 hover:text-parchment-300",
+          ].join(" ")}
+        >
+          {selected ? (
+            <Icons.IconCheckSquare className="h-5 w-5" />
+          ) : (
+            <Icons.IconSquare className="h-5 w-5" />
+          )}
+        </button>
+      )}
+
       {/* Type badge */}
       <span
         className={[
           "flex h-7 w-7 shrink-0 items-center justify-center rounded-md border",
-          item.kind === "chat"
-            ? "border-blue-500/40 bg-blue-500/10 text-blue-300"
-            : "border-bronze-600/50 bg-bronze-600/15 text-bronze-300",
+          kindBadgeClass(item.kind),
         ].join(" ")}
-        title={item.kind === "chat" ? "Conversation" : "Workspace"}
+        title={kindNoun(item.kind)}
       >
-        {item.kind === "chat" ? (
-          <Icons.IconChat className="h-4 w-4" />
-        ) : (
-          <Icons.IconBox className="h-4 w-4" />
-        )}
+        {kindIcon(item.kind)}
       </span>
 
       <div className="min-w-0 flex-1">
@@ -633,16 +1038,12 @@ function ItemRow({
             <Icons.IconPin className="h-3 w-3 shrink-0 text-bronze-400" />
           )}
           {renaming ? (
-            <input
-              autoFocus
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onClick={(e) => e.stopPropagation()}
-              onBlur={commitRename}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") commitRename();
-                if (e.key === "Escape") setRenaming(false);
-              }}
+            <InlineRename
+              value={item.title}
+              onCommit={commitRename}
+              onCancel={() => setRenaming(false)}
+              selectOnFocus
+              ariaLabel={`Rename ${item.title}`}
               className="min-w-0 flex-1 rounded border border-bronze-600 bg-ink-900 px-1.5 py-0.5 text-sm text-parchment-100 focus:outline-none"
             />
           ) : (
@@ -667,23 +1068,25 @@ function ItemRow({
         </div>
         <div className="mt-0.5 font-mono text-[11px] text-parchment-600">
           <span className="uppercase tracking-wide">
-            {item.kind === "chat" ? "Chat" : "Workspace"}
+            {kindNoun(item.kind)}
           </span>{" "}
           · {item.subtitle}
         </div>
       </div>
 
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-          setMenu({ x: r.right, y: r.bottom });
-        }}
-        aria-label="Item actions"
-        className="rounded p-1 text-parchment-600 opacity-0 transition-opacity hover:bg-ink-800 hover:text-parchment-100 focus-within:opacity-100 group-hover:opacity-100"
-      >
-        <Icons.IconSliders className="h-4 w-4" />
-      </button>
+      {!selectMode && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            setMenu({ x: r.right, y: r.bottom });
+          }}
+          aria-label="Item actions"
+          className="rounded p-1 text-parchment-600 opacity-0 transition-opacity hover:bg-ink-800 hover:text-parchment-100 focus-within:opacity-100 group-hover:opacity-100"
+        >
+          <Icons.IconSliders className="h-4 w-4" />
+        </button>
+      )}
 
       {menu && (
         <ItemMenu
@@ -732,61 +1135,19 @@ function ItemMenu({
   onRename: () => void;
   onDelete: () => void;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  useLayoutEffect(() => {
-    const el = ref.current;
-    const w = el?.offsetWidth ?? 240;
-    const h = el?.offsetHeight ?? 320;
-    const m = 8;
-    setPos({
-      left: Math.max(m, Math.min(x, window.innerWidth - w - m)),
-      top: Math.max(m, Math.min(y, window.innerHeight - h - m)),
-    });
-  }, [x, y]);
-
-  useEffect(() => {
-    function onDoc(e: PointerEvent) {
-      if (ref.current?.contains(e.target as Node)) return;
-      onClose();
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    document.addEventListener("pointerdown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("pointerdown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [onClose]);
-
-  if (typeof document === "undefined") return null;
-
-  return createPortal(
-    <div
-      ref={ref}
-      role="menu"
-      onClick={(e) => e.stopPropagation()}
-      style={{
-        position: "fixed",
-        left: pos?.left ?? x,
-        top: pos?.top ?? y,
-        visibility: pos ? "visible" : "hidden",
-      }}
-      className="z-[100] w-60 overflow-hidden rounded-lg border border-ink-700 bg-ink-900 py-1 shadow-[0_12px_32px_rgba(0,0,0,0.5)]"
-    >
-      <MenuItem
-        icon={item.kind === "chat" ? <Icons.IconChat className="h-4 w-4" /> : <Icons.IconBox className="h-4 w-4" />}
+  return (
+    <ContextMenu x={x} y={y} width={240} onClose={onClose}>
+      <ContextMenuItem
+        icon={kindIcon(item.kind)}
         label="Open"
         onClick={() => {
           onOpen();
           onClose();
         }}
       />
-      <MenuItem
+      <ContextMenuItem
         icon={<Icons.IconPin className="h-4 w-4" />}
         label={item.pinned ? "Unpin" : "Pin to top"}
         onClick={() => {
@@ -794,7 +1155,7 @@ function ItemMenu({
           onClose();
         }}
       />
-      <MenuItem
+      <ContextMenuItem
         icon={<Icons.IconPencil className="h-4 w-4" />}
         label="Rename"
         onClick={() => {
@@ -803,10 +1164,8 @@ function ItemMenu({
         }}
       />
 
-      <div className="my-1 h-px bg-ink-700" />
-      <div className="px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-parchment-600">
-        Tags
-      </div>
+      <ContextMenuSeparator />
+      <ContextMenuLabel>Tags</ContextMenuLabel>
       {tags.length === 0 ? (
         <div className="px-3 py-1 text-[11px] text-parchment-600">
           No tags — create some in “manage tags”.
@@ -831,10 +1190,8 @@ function ItemMenu({
         })
       )}
 
-      <div className="my-1 h-px bg-ink-700" />
-      <div className="px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-parchment-600">
-        Move to folder
-      </div>
+      <ContextMenuSeparator />
+      <ContextMenuLabel>Move to folder</ContextMenuLabel>
       <button
         role="menuitemradio"
         aria-checked={!item.folderId}
@@ -867,70 +1224,19 @@ function ItemMenu({
         </button>
       ))}
 
-      <div className="my-1 h-px bg-ink-700" />
-      {confirmDelete ? (
-        <div className="flex items-center gap-3 py-2 pl-4">
-          <span className="text-xs font-medium text-signal-err">
-            Delete {item.kind === "chat" ? "chat" : "workspace"}?
-          </span>
-          <button
-            onClick={() => {
-              onDelete();
-              onClose();
-            }}
-            className="rounded p-0.5 text-signal-err hover:bg-signal-err/20"
-            aria-label="Confirm delete"
-          >
-            <Icons.IconCheck className="h-4 w-4" />
-          </button>
-          <button
-            onClick={() => setConfirmDelete(false)}
-            className="rounded p-0.5 text-parchment-400 hover:bg-ink-700 hover:text-parchment-100"
-            aria-label="Cancel"
-          >
-            <Icons.IconClose className="h-4 w-4" />
-          </button>
-        </div>
-      ) : (
-        <MenuItem
-          icon={<Icons.IconTrash className="h-4 w-4" />}
-          label={item.kind === "chat" ? "Delete chat" : "Delete workspace"}
-          destructive
-          onClick={() => setConfirmDelete(true)}
-        />
-      )}
-    </div>,
-    document.body
-  );
-}
-
-function MenuItem({
-  icon,
-  label,
-  onClick,
-  destructive,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  onClick: () => void;
-  destructive?: boolean;
-}) {
-  return (
-    <button
-      role="menuitem"
-      onClick={onClick}
-      className={[
-        "flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors",
-        destructive
-          ? "text-signal-err hover:bg-signal-err/10"
-          : "text-parchment-400 hover:bg-ink-800 hover:text-parchment-100",
-      ].join(" ")}
-    >
-      <span className={destructive ? "text-signal-err" : "text-parchment-600"}>
-        {icon}
-      </span>
-      <span className="truncate">{label}</span>
-    </button>
+      <ContextMenuSeparator />
+      <ContextMenuDelete
+        label={`Delete ${kindNoun(item.kind).toLowerCase()}`}
+        confirmMessage={`Delete ${kindNoun(item.kind).toLowerCase()}?`}
+        armed={confirmDelete}
+        onArm={() => setConfirmDelete(true)}
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={() => {
+          onDelete();
+          onClose();
+        }}
+      />
+    </ContextMenu>
   );
 }
 

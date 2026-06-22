@@ -29,6 +29,7 @@ export default function Sidebar({
 }) {
   const newConversation = useMimir((s) => s.newConversation);
   const newWorkspace = useMimir((s) => s.newWorkspace);
+  const newImageStudio = useMimir((s) => s.newImageStudio);
   const openWindow = useMimir((s) => s.openWindow);
   const setSearchOpen = useMimir((s) => s.setSearchOpen);
   const username = useMimir((s) => s.settings.username);
@@ -117,6 +118,11 @@ export default function Sidebar({
           label="New workspace"
           icon={<IconPlus />}
           onClick={go(newWorkspace)}
+        />
+        <SidebarButton
+          label="New image studio"
+          icon={<IconPlus />}
+          onClick={go(newImageStudio)}
         />
         <SidebarButton
           label="Search"

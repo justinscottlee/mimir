@@ -56,7 +56,24 @@ export function resolveEnabledModels(
   return out;
 }
 
-/** Resolves a model key to everything needed to make a request. */
+/**
+ * Narrows resolved models to those whose endpoint serves a given modality.
+ * An endpoint with kind "both" (or unset) matches every modality, so existing
+ * setups are unaffected until an endpoint is explicitly tagged "text" or
+ * "image". Used so the image studio only lists image models and chat/workspace
+ * only list text models.
+ */
+export function modelsForModality(
+  models: ResolvedModel[],
+  endpoints: Endpoint[],
+  modality: "text" | "image"
+): ResolvedModel[] {
+  const kindById = new Map(endpoints.map((e) => [e.id, e.kind ?? "both"]));
+  return models.filter((m) => {
+    const kind = kindById.get(m.endpointId) ?? "both";
+    return kind === "both" || kind === modality;
+  });
+}
 export function resolveModelKey(
   key: string | undefined,
   settings: Settings

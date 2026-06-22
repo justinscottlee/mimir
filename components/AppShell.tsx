@@ -8,6 +8,7 @@ import TabBar from "./TabBar";
 import SearchOverlay from "./SearchOverlay";
 import ChatView from "./views/ChatView";
 import WorkspaceView from "./views/WorkspaceView";
+import ImageStudioView from "./views/ImageStudioView";
 import EmptyState from "./EmptyState";
 import AuthGate from "./AuthGate";
 import { WindowLayer } from "./FloatingWindow";
@@ -129,6 +130,9 @@ export default function AppShell() {
           )}
           {active?.kind === "workspace" && (
             <WorkspaceView key={active.refId} workspaceId={active.refId} />
+          )}
+          {active?.kind === "image" && (
+            <ImageStudioView key={active.refId} studioId={active.refId} />
           )}
         </div>
       </main>

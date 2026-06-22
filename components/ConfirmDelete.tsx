@@ -87,7 +87,7 @@ export default function ConfirmDelete({
       title={label}
       aria-label={label}
     >
-      <IconTrash className={"h-4 w-4"} />
+      <IconTrash className={["h-4 w-4", className].join(" ")} />
     </button>
   );
 }

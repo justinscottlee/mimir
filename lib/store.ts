@@ -8,6 +8,7 @@ import {
   Conversation,
   Endpoint,
   FloatingWindow,
+  ImageStudio,
   Memory,
   Message,
   PlanItem,
@@ -27,6 +28,7 @@ import {
 } from "./types";
 import {
   DEFAULT_AGENT_CONFIG,
+  DEFAULT_IMAGE_PARAMS,
   DEFAULT_TOOL_SETTINGS,
   MAX_WORKSPACE_RUNS,
   WINDOW_SPECS,
@@ -40,6 +42,11 @@ import {
   createOrganizationSlice,
   OrganizationSlice,
 } from "./store-slices/organizationSlice";
+import {
+  createImageStudioSlice,
+  ImageStudioSlice,
+} from "./store-slices/imageStudioSlice";
+import { isEmptyRef } from "./store-slices/isEmpty";
 
 // Re-exported so existing imports (`import { uid, useMimir, WINDOW_SPECS }
 // from "@/lib/store"`) keep working unchanged.
@@ -61,7 +68,7 @@ export interface PartialToolSettings {
 /** Lifecycle of the server-backed store. */
 export type StoreStatus = "idle" | "loading" | "ready" | "error";
 
-export interface MimirState extends OrganizationSlice {
+export interface MimirState extends OrganizationSlice, ImageStudioSlice {
   /** Hydration lifecycle: idle (signed out) → loading → ready. */
   status: StoreStatus;
 
@@ -78,6 +85,13 @@ export interface MimirState extends OrganizationSlice {
    */
   streamingConvs: Record<string, boolean>;
   workspaces: Record<string, Workspace>;
+  imageStudios: Record<string, ImageStudio>;
+  /**
+   * Which image studios currently have an in-flight generation, keyed by id.
+   * Kept in the store (not component state) so it survives ImageStudioView
+   * remounting when you switch tabs, mirroring `streamingConvs`.
+   */
+  generatingStudios: Record<string, boolean>;
   memories: Record<string, Memory>;
   skills: Record<string, Skill>;
   systemPrompts: Record<string, SystemPrompt>;
@@ -179,6 +193,18 @@ export interface MimirState extends OrganizationSlice {
     outcome: TurnOutcome
   ) => void;
 
+  // Image studios
+  newImageStudio: () => void;
+  openImageStudio: (id: string) => void;
+  deleteImageStudio: (id: string) => void;
+  deleteImageStudios: (ids: string[]) => void;
+  setImageStudioTitle: (id: string, title: string) => void;
+  // Gallery + composer actions live in the image-studio slice (mixed in via
+  // ImageStudioSlice): setImageStudioModel, setImageStudioParams,
+  // setStudioGenerating, appendGeneratedImages, updateGeneratedImage,
+  // applyImageEdit, revertImageToOriginal, deleteGeneratedImage,
+  // toggleImageFavorite, clearImageStudioImages.
+
   // Memories
   addMemory: (
     content: string,
@@ -242,6 +268,8 @@ function emptyState() {
     conversations: {} as Record<string, Conversation>,
     streamingConvs: {} as Record<string, boolean>,
     workspaces: {} as Record<string, Workspace>,
+    imageStudios: {} as Record<string, ImageStudio>,
+    generatingStudios: {} as Record<string, boolean>,
     memories: {} as Record<string, Memory>,
     skills: {} as Record<string, Skill>,
     systemPrompts: {} as Record<string, SystemPrompt>,
@@ -288,6 +316,7 @@ export const useMimir = create<MimirState>()((set, get, store) => ({
       set({
         conversations: snapshot.conversations,
         workspaces: snapshot.workspaces,
+        imageStudios: snapshot.imageStudios ?? {},
         memories: snapshot.memories,
         skills: snapshot.skills,
         systemPrompts: snapshot.systemPrompts,
@@ -354,25 +383,36 @@ export const useMimir = create<MimirState>()((set, get, store) => ({
   },
 
   /**
-   * Drop an untouched conversation/workspace once its tab is gone. "Empty" means
-   * a chat with no messages, or a workspace with no files and no agent runs.
-   * Guarded so a ref still open in another tab is never deleted.
+   * Drop an untouched conversation/workspace/image studio once its tab is gone.
+   * "Empty" is decided by the shared predicates in store-slices/isEmpty (a chat
+   * with no real content, a workspace with no files/runs, a studio with no
+   * images), so the stop-before-first-token path — a send that streamed nothing
+   * and left only an empty assistant bubble — is now also discarded, while a
+   * conversation the user actually typed into is kept. Guarded so a ref still
+   * open in another tab is never deleted.
    */
   discardIfEmpty: (kind, refId) => {
     const s = get();
     if (s.tabs.some((t) => t.kind === kind && t.refId === refId)) return;
+    if (!isEmptyRef(kind, refId, s)) return;
     if (kind === "chat") {
-      const conv = s.conversations[refId];
-      if (!conv || conv.messages.length > 0) return;
+      if (!s.conversations[refId]) return;
       set((st) => {
         const conversations = { ...st.conversations };
         delete conversations[refId];
         return { conversations };
       });
       void sync.deleteConversation(refId);
+    } else if (kind === "image") {
+      if (!s.imageStudios[refId]) return;
+      set((st) => {
+        const imageStudios = { ...st.imageStudios };
+        delete imageStudios[refId];
+        return { imageStudios };
+      });
+      void sync.deleteImageStudio(refId);
     } else {
-      const ws = s.workspaces[refId];
-      if (!ws || ws.files.length > 0 || ws.runs.length > 0) return;
+      if (!s.workspaces[refId]) return;
       set((st) => {
         const workspaces = { ...st.workspaces };
         delete workspaces[refId];
@@ -397,7 +437,7 @@ export const useMimir = create<MimirState>()((set, get, store) => ({
     });
   },
 
-  /** Renames a tab and the conversation/workspace it points at. */
+  /** Renames a tab and the conversation/workspace/studio it points at. */
   renameTabRef: (tabId, title) => {
     const tab = get().tabs.find((t) => t.id === tabId);
     if (!tab) return;
@@ -405,6 +445,8 @@ export const useMimir = create<MimirState>()((set, get, store) => ({
     if (!clean) return;
     if (tab.kind === "chat") {
       get().setConversationTitle(tab.refId, clean);
+    } else if (tab.kind === "image") {
+      get().setImageStudioTitle(tab.refId, clean);
     } else {
       get().setWorkspaceName(tab.refId, clean);
     }
@@ -895,6 +937,85 @@ export const useMimir = create<MimirState>()((set, get, store) => ({
       return { workspaces: { ...s.workspaces, [id]: { ...ws, runs: [] } } };
     }),
 
+  // ---------- Image studios ----------
+
+  newImageStudio: () => {
+    const id = uid("img_");
+    const now = Date.now();
+    const studio: ImageStudio = {
+      id,
+      title: "New image studio",
+      model: get().settings.defaultImageModel,
+      params: { ...DEFAULT_IMAGE_PARAMS },
+      images: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    set((s) => ({
+      imageStudios: { ...s.imageStudios, [id]: studio },
+    }));
+    get().openTab("image", id, studio.title);
+  },
+
+  openImageStudio: (id) => {
+    const studio = get().imageStudios[id];
+    if (!studio) return;
+    get().openTab("image", id, studio.title);
+  },
+
+  deleteImageStudio: (id) => {
+    set((s) => {
+      const imageStudios = { ...s.imageStudios };
+      delete imageStudios[id];
+      const tabs = s.tabs.filter(
+        (t) => !(t.kind === "image" && t.refId === id)
+      );
+      const activeTabId = tabs.some((t) => t.id === s.activeTabId)
+        ? s.activeTabId
+        : tabs[tabs.length - 1]?.id ?? null;
+      return { imageStudios, tabs, activeTabId };
+    });
+    void sync.deleteImageStudio(id);
+  },
+
+  deleteImageStudios: (ids) => {
+    const idSet = new Set(ids);
+    set((s) => {
+      const imageStudios = { ...s.imageStudios };
+      for (const id of ids) delete imageStudios[id];
+      const tabs = s.tabs.filter(
+        (t) => !(t.kind === "image" && idSet.has(t.refId))
+      );
+      const activeTabId = tabs.some((t) => t.id === s.activeTabId)
+        ? s.activeTabId
+        : tabs[tabs.length - 1]?.id ?? null;
+      return { imageStudios, tabs, activeTabId };
+    });
+    void sync.deleteImageStudiosBatch(ids);
+  },
+
+  setImageStudioTitle: (id, title) =>
+    set((s) => {
+      const studio = s.imageStudios[id];
+      if (!studio) return s;
+      return {
+        imageStudios: {
+          ...s.imageStudios,
+          [id]: { ...studio, title },
+        },
+        // Keep any open tab's label in sync.
+        tabs: s.tabs.map((t) =>
+          t.kind === "image" && t.refId === id ? { ...t, title } : t
+        ),
+      };
+    }),
+
+  // Gallery + composer actions (setImageStudioModel, setImageStudioParams,
+  // setStudioGenerating, appendGeneratedImages, updateGeneratedImage,
+  // applyImageEdit, revertImageToOriginal, deleteGeneratedImage,
+  // toggleImageFavorite, clearImageStudioImages) are provided by
+  // createImageStudioSlice, spread in below.
+
   // ---------- Memories ----------
 
   addMemory: (content, opts) => {
@@ -1154,6 +1275,9 @@ export const useMimir = create<MimirState>()((set, get, store) => ({
   // ---------- Organization + pricing (extracted slice) ----------
   ...createOrganizationSlice(set, get, store),
 
+  // ---------- Image-studio gallery + composer (extracted slice) ----------
+  ...createImageStudioSlice(set, get, store),
+
   setSearchOpen: (open) => set({ searchOpen: open }),
 }));
 
@@ -1178,6 +1302,7 @@ type PersistedSlices = Pick<
   MimirState,
   | "conversations"
   | "workspaces"
+  | "imageStudios"
   | "memories"
   | "skills"
   | "systemPrompts"
@@ -1192,6 +1317,7 @@ function snapshotSlices(s: MimirState): PersistedSlices {
   return {
     conversations: s.conversations,
     workspaces: s.workspaces,
+    imageStudios: s.imageStudios,
     memories: s.memories,
     skills: s.skills,
     systemPrompts: s.systemPrompts,
@@ -1229,6 +1355,7 @@ useMimir.subscribe((state) => {
 
   diffMap(prev.conversations, state.conversations, sync.syncConversation);
   diffMap(prev.workspaces, state.workspaces, sync.syncWorkspace);
+  diffMap(prev.imageStudios, state.imageStudios, sync.syncImageStudio);
   diffMap(prev.memories, state.memories, sync.syncMemory);
   diffMap(prev.skills, state.skills, sync.syncSkill);
   diffMap(prev.systemPrompts, state.systemPrompts, sync.syncSystemPrompt);

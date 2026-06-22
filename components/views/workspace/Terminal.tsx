@@ -326,6 +326,23 @@ export default function Terminal({ workspaceId }: { workspaceId: string }) {
     };
   }, [workspaceId, measure]);
 
+  // openSession() measures before the PTY is created, but on a fast tab switch
+  // the pane can finish sizing a beat later — leaving the shell a few cols/rows
+  // off until the next manual resize. Re-measure once it goes live and correct
+  // the PTY if the size moved.
+  useEffect(() => {
+    if (phase !== "live") return;
+    const before = lastSize.current;
+    const { cols, rows } = measure();
+    if (cols !== before.cols || rows !== before.rows) {
+      const ptyId = ptyIdRef.current;
+      if (ptyId) {
+        void api.ptyResize(workspaceId, ptyId, cols, rows).catch(() => {});
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
+
   /* -------------------------------- reset ------------------------------- */
 
   async function reset() {

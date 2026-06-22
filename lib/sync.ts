@@ -3,6 +3,7 @@
 import { api } from "./api";
 import {
   Conversation,
+  ImageStudio,
   Memory,
   Settings,
   Skill,
@@ -24,6 +25,7 @@ import {
 const DEBOUNCE = {
   conversation: 700, // coalesce streaming patches
   workspace: 700, // coalesce streaming agent steps + filesystem writes
+  imageStudio: 700, // coalesce composer edits + gallery appends
   ui: 600, // coalesce drags/resizes
   settings: 500,
   entity: 350, // memories / skills / system prompts
@@ -95,6 +97,20 @@ export function syncWorkspace(w: Workspace) {
 export function deleteWorkspace(id: string) {
   cancel(`ws:${id}`);
   return api.deleteWorkspace(id);
+}
+
+/* ----------------------------- image studios ---------------------------- */
+
+export function syncImageStudio(s: ImageStudio) {
+  schedule(`img:${s.id}`, DEBOUNCE.imageStudio, () => api.putImageStudio(s));
+}
+export function deleteImageStudio(id: string) {
+  cancel(`img:${id}`);
+  return api.deleteImageStudio(id);
+}
+export function deleteImageStudiosBatch(ids: string[]) {
+  for (const id of ids) cancel(`img:${id}`);
+  return api.deleteImageStudiosBatch(ids);
 }
 
 /* -------------------------------- memories ------------------------------ */

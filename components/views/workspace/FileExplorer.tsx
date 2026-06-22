@@ -3,12 +3,10 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
 import { useMimir } from "@/lib/store";
 import { WorkspaceFile } from "@/lib/types";
 import * as fs from "@/lib/workspace/fs";
@@ -18,6 +16,13 @@ import {
   buildUploadFromFiles,
   UploadNode,
 } from "@/lib/workspace/upload";
+import {
+  ContextMenu,
+  ContextMenuDelete,
+  ContextMenuItem,
+  ContextMenuSeparator,
+} from "@/components/ContextMenu";
+import InlineRename from "@/components/InlineRename";
 import * as Icons from "@/components/icons";
 
 /**
@@ -88,7 +93,6 @@ export default function FileExplorer({
 
   // Inline rename: the path being renamed.
   const [renaming, setRenaming] = useState<string | null>(null);
-  const [renameDraft, setRenameDraft] = useState("");
 
   // Right-click menu state. `path` is null for the empty-area (root) menu.
   const [menu, setMenu] = useState<{
@@ -159,13 +163,12 @@ export default function FileExplorer({
 
   function beginRename(path: string) {
     setRenaming(path);
-    setRenameDraft(fs.baseName(path));
     setError(null);
   }
 
-  function commitRename() {
+  function commitRename(value: string) {
     if (!renaming) return;
-    const newName = renameDraft.trim();
+    const newName = value.trim();
     const oldName = fs.baseName(renaming);
     if (!newName || newName === oldName) {
       setRenaming(null);
@@ -540,8 +543,6 @@ export default function FileExplorer({
             onSelect={onSelect}
             onContextMenu={openMenu}
             renaming={renaming}
-            renameDraft={renameDraft}
-            onRenameDraft={setRenameDraft}
             onCommitRename={commitRename}
             onCancelRename={() => setRenaming(null)}
             creating={creating}
@@ -596,9 +597,7 @@ interface TreeSharedProps {
   onSelect: (path: string) => void;
   onContextMenu: (e: React.MouseEvent, path: string | null) => void;
   renaming: string | null;
-  renameDraft: string;
-  onRenameDraft: (s: string) => void;
-  onCommitRename: () => void;
+  onCommitRename: (value: string) => void;
   onCancelRename: () => void;
   creating: { kind: "file" | "dir"; dir: string } | null;
   createDraft: string;
@@ -655,6 +654,10 @@ function Row({
   const selected = shared.selectedPath === node.path;
   const isRenaming = shared.renaming === node.path;
   const isDragging = shared.dragPath === node.path;
+  // A dir drops into itself; a file drops into its containing folder. Without
+  // this, dropping onto a file row had no handler and the drop bubbled to the
+  // tree container, landing the item at the root instead of beside the file.
+  const dropTargetDir = isDir ? node.path : fs.parentPath(node.path);
   const isDropTarget =
     isDir &&
     !!shared.dragPath &&
@@ -676,32 +679,23 @@ function Row({
           e.stopPropagation();
           shared.onDragEndNode();
         }}
-        onDragOver={
-          isDir
-            ? (e) => {
-                if (shared.dragPath && canDropInto(shared.dragPath, node.path)) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  e.dataTransfer.dropEffect = "move";
-                  shared.onDropTarget(node.path);
-                }
-              }
-            : undefined
-        }
-        onDrop={
-          isDir
-            ? (e) => {
-                const moving =
-                  e.dataTransfer.getData(MOVE_MIME) || shared.dragPath;
-                if (moving) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  shared.onMoveInto(moving, node.path);
-                  shared.onDragEndNode();
-                }
-              }
-            : undefined
-        }
+        onDragOver={(e) => {
+          if (shared.dragPath && canDropInto(shared.dragPath, dropTargetDir)) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = "move";
+            shared.onDropTarget(dropTargetDir);
+          }
+        }}
+        onDrop={(e) => {
+          const moving = e.dataTransfer.getData(MOVE_MIME) || shared.dragPath;
+          if (moving && canDropInto(moving, dropTargetDir)) {
+            e.preventDefault();
+            e.stopPropagation();
+            shared.onMoveInto(moving, dropTargetDir);
+            shared.onDragEndNode();
+          }
+        }}
         className={[
           "group flex cursor-pointer items-center gap-1.5 pr-2 text-sm transition-colors",
           isDropTarget
@@ -740,17 +734,13 @@ function Row({
         )}
 
         {isRenaming ? (
-          <input
-            autoFocus
-            value={shared.renameDraft}
-            onChange={(e) => shared.onRenameDraft(e.target.value)}
-            onClick={(e) => e.stopPropagation()}
-            onBlur={shared.onCommitRename}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") shared.onCommitRename();
-              if (e.key === "Escape") shared.onCancelRename();
-            }}
+          <InlineRename
+            value={name}
+            onCommit={shared.onCommitRename}
+            onCancel={shared.onCancelRename}
             spellCheck={false}
+            selectOnFocus
+            ariaLabel={`Rename ${name}`}
             className="my-0.5 min-w-0 flex-1 rounded border border-bronze-600 bg-ink-900 px-1 py-0.5 font-mono text-xs text-parchment-100 focus:outline-none"
           />
         ) : (
@@ -861,41 +851,7 @@ function FileContextMenu({
   onDownloadZip: () => void;
   onDelete: () => void;
 }) {
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-
-  useLayoutEffect(() => {
-    const el = menuRef.current;
-    const w = el?.offsetWidth ?? 200;
-    const h = el?.offsetHeight ?? 240;
-    const margin = 8;
-    const left = Math.max(margin, Math.min(x, window.innerWidth - w - margin));
-    const top = Math.max(margin, Math.min(y, window.innerHeight - h - margin));
-    setPos({ left, top });
-  }, [x, y]);
-
-  useEffect(() => {
-    function onDocPointer(e: PointerEvent) {
-      if (menuRef.current?.contains(e.target as Node)) return;
-      onClose();
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    document.addEventListener("pointerdown", onDocPointer);
-    document.addEventListener("keydown", onKey);
-    window.addEventListener("resize", onClose);
-    window.addEventListener("scroll", onClose, true);
-    return () => {
-      document.removeEventListener("pointerdown", onDocPointer);
-      document.removeEventListener("keydown", onKey);
-      window.removeEventListener("resize", onClose);
-      window.removeEventListener("scroll", onClose, true);
-    };
-  }, [onClose]);
-
-  if (typeof document === "undefined") return null;
 
   const run = (fn: () => void) => () => {
     fn();
@@ -903,59 +859,48 @@ function FileContextMenu({
   };
 
   const isDir = node?.type === "dir";
-  const dirLabel =
-    targetDir === "/" ? "root" : fs.baseName(targetDir) + "/";
+  const dirLabel = targetDir === "/" ? "root" : fs.baseName(targetDir) + "/";
 
-  return createPortal(
-    <div
-      ref={menuRef}
-      role="menu"
-      style={{
-        position: "fixed",
-        left: pos?.left ?? x,
-        top: pos?.top ?? y,
-        visibility: pos ? "visible" : "hidden",
-      }}
-      className="z-[100] w-56 overflow-hidden rounded-lg border border-ink-700 bg-ink-900 py-1 shadow-[0_12px_32px_rgba(0,0,0,0.5)]"
-    >
+  return (
+    <ContextMenu x={x} y={y} onClose={onClose}>
       {node && (
         <>
           {!isDir && (
-            <MenuItem
+            <ContextMenuItem
               icon={<Icons.IconFile className="h-4 w-4" />}
               label="Open"
               onClick={run(onOpen)}
             />
           )}
-          <MenuItem
+          <ContextMenuItem
             icon={<Icons.IconPencil className="h-4 w-4" />}
             label="Rename"
             onClick={run(onRename)}
           />
           {!isDir && (
-            <MenuItem
+            <ContextMenuItem
               icon={<Icons.IconDownload className="h-4 w-4" />}
               label="Download"
               onClick={run(onDownload)}
             />
           )}
           {isDir && (
-            <MenuItem
+            <ContextMenuItem
               icon={<Icons.IconDownload className="h-4 w-4" />}
               label="Download as zip"
               onClick={run(onDownloadZip)}
             />
           )}
-          <div className="my-1 h-px bg-ink-700" />
+          <ContextMenuSeparator />
         </>
       )}
 
-      <MenuItem
+      <ContextMenuItem
         icon={<Icons.IconFile className="h-4 w-4" />}
         label={`New file in ${dirLabel}`}
         onClick={run(onNewFile)}
       />
-      <MenuItem
+      <ContextMenuItem
         icon={<Icons.IconFolder className="h-4 w-4" />}
         label={`New folder in ${dirLabel}`}
         onClick={run(onNewFolder)}
@@ -963,86 +908,17 @@ function FileContextMenu({
 
       {node && (
         <>
-          <div className="my-1 h-px bg-ink-700" />
-          {confirmDelete ? (
-            <div className="flex items-center gap-3 py-2 pl-4">
-              <span className="text-xs font-medium text-signal-err">
-                Delete {isDir ? "folder" : "file"}?
-              </span>
-              <button
-                onClick={() => {
-                  onDelete();
-                  onClose();
-                }}
-                className="rounded p-0.5 text-signal-err hover:bg-signal-err/20"
-                title="Confirm delete"
-                aria-label="Confirm delete"
-              >
-                <Icons.IconCheck className="h-4 w-4" />
-              </button>
-              <button
-                onClick={() => setConfirmDelete(false)}
-                className="rounded p-0.5 text-parchment-400 hover:bg-ink-700 hover:text-parchment-100"
-                title="Cancel"
-                aria-label="Cancel delete"
-              >
-                <Icons.IconClose className="h-4 w-4" />
-              </button>
-            </div>
-          ) : (
-            <MenuItem
-              icon={<Icons.IconTrash className="h-4 w-4" />}
-              label={isDir ? "Delete folder" : "Delete file"}
-              destructive
-              onClick={() => setConfirmDelete(true)}
-            />
-          )}
+          <ContextMenuSeparator />
+          <ContextMenuDelete
+            label={isDir ? "Delete folder" : "Delete file"}
+            confirmMessage={`Delete ${isDir ? "folder" : "file"}?`}
+            armed={confirmDelete}
+            onArm={() => setConfirmDelete(true)}
+            onCancel={() => setConfirmDelete(false)}
+            onConfirm={run(onDelete)}
+          />
         </>
       )}
-    </div>,
-    document.body
-  );
-}
-
-function MenuItem({
-  icon,
-  label,
-  onClick,
-  disabled,
-  destructive,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-  destructive?: boolean;
-}) {
-  return (
-    <button
-      role="menuitem"
-      onClick={onClick}
-      disabled={disabled}
-      className={[
-        "flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors",
-        disabled
-          ? "cursor-not-allowed text-parchment-600/40"
-          : destructive
-          ? "text-signal-err hover:bg-signal-err/10"
-          : "text-parchment-400 hover:bg-ink-800 hover:text-parchment-100",
-      ].join(" ")}
-    >
-      <span
-        className={
-          disabled
-            ? "text-parchment-600/40"
-            : destructive
-            ? "text-signal-err"
-            : "text-parchment-600"
-        }
-      >
-        {icon}
-      </span>
-      <span className="truncate">{label}</span>
-    </button>
+    </ContextMenu>
   );
 }

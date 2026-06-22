@@ -1,11 +1,14 @@
-/** Tabs are reserved for things you interact with: chats and workspaces. */
-export type TabKind = "chat" | "workspace";
+/** Tabs are reserved for things you interact with: chats, workspaces, images. */
+export type TabKind = "chat" | "workspace" | "image";
 
 export interface Tab {
   id: string;
   kind: TabKind;
   title: string;
-  /** Conversation id for chat tabs, workspace id for workspace tabs. */
+  /**
+   * Conversation id for chat tabs, workspace id for workspace tabs, image
+   * studio id for image tabs.
+   */
   refId: string;
 }
 
@@ -109,6 +112,119 @@ export interface Conversation {
    * lists both together). `folderId` points at a Folder in Settings, or is
    * absent for the top level. `tagIds` references Tags in Settings. `pinned`
    * floats the item to the top of its folder.
+   */
+  folderId?: string;
+  tagIds?: string[];
+  pinned?: boolean;
+}
+
+/* ============================================================================
+ * Image studios — text-to-image generation
+ *
+ * A studio is the image-generation analogue of a Conversation: a durable,
+ * named workspace that remembers its composer settings (prompt + parameters)
+ * and accumulates a gallery of results. Generation hits the OpenAI-compatible
+ * `/v1/images/generations` endpoint on the selected model's endpoint, proxied
+ * through /api/llama/* exactly like chat — see lib/imagegen.ts.
+ * ==========================================================================*/
+
+/**
+ * The composer parameters for a generation. Sticky between runs (they live on
+ * the studio) so re-rolling or tweaking is one edit away. `width`/`height` map
+ * to the OpenAI `size` field; the rest are sent as widely-recognized
+ * extensions and are honored only if the backend understands them (a local
+ * Stable Diffusion / Flux server typically does; a strict OpenAI endpoint
+ * ignores the extras). `seed` undefined means "random each time".
+ */
+export interface ImageGenParams {
+  prompt: string;
+  negativePrompt?: string;
+  width: number;
+  height: number;
+  /** Diffusion steps (extension; ignored by backends that don't support it). */
+  steps?: number;
+  /** Classifier-free guidance scale (extension). */
+  cfgScale?: number;
+  /** Sampler / scheduler name (extension), e.g. "euler_a". */
+  sampler?: string;
+  /** Fixed seed for reproducibility; undefined = random each generation. */
+  seed?: number;
+  /** How many images to request per generation (OpenAI `n`). */
+  batchSize: number;
+  /**
+   * Reference images as `data:` URIs for FLUX.2 editing / image-guided
+   * generation. When present, the prompt edits or composes from these rather
+   * than generating from scratch. The model takes several, but each one costs
+   * extra VRAM. Sent to the backend as the `image` field.
+   */
+  referenceImages?: string[];
+}
+
+/**
+ * One generated image plus the settings that produced it, so a result is
+ * self-describing (hover for its prompt/seed, or copy its settings back into
+ * the composer to iterate). `src` is render-ready: a `data:` URI when the
+ * backend returned base64 (the default we request), or a remote URL when it
+ * returned one instead.
+ */
+/**
+ * The pristine, pre-edit version of an image, captured the first time it is
+ * resized or upscaled so the original bytes are never lost. Lets the gallery
+ * mark an image as edited, show the original on demand, and revert to it.
+ */
+export interface ImageEditOriginal {
+  src: string;
+  mimeType?: string;
+  width: number;
+  height: number;
+}
+
+export interface GeneratedImage {
+  id: string;
+  /** Render-ready image source: a `data:image/...;base64,…` URI or a URL. */
+  src: string;
+  /** Best-effort MIME type (informational; e.g. "image/png"). */
+  mimeType?: string;
+  prompt: string;
+  negativePrompt?: string;
+  width: number;
+  height: number;
+  steps?: number;
+  cfgScale?: number;
+  sampler?: string;
+  seed?: number;
+  /** Model key (endpointId::modelId) that produced this image. */
+  model?: string;
+  createdAt: number;
+  /** Pinned/favorited within the gallery. */
+  favorite?: boolean;
+  /**
+   * How this image entered the studio. `"upload"` images are dropped/picked in
+   * by the user (typically to resize); everything else is model-generated.
+   * Absent is treated as `"generated"` for back-compat with older rows.
+   */
+  source?: "generated" | "upload";
+  /**
+   * Set once the image has been resized or upscaled: the pristine original it
+   * was edited from. Absent means the image is still its original self.
+   */
+  original?: ImageEditOriginal;
+}
+
+export interface ImageStudio {
+  id: string;
+  title: string;
+  /** Image model key (endpointId::modelId). */
+  model?: string;
+  /** Current composer settings (carried between generations). */
+  params: ImageGenParams;
+  /** Gallery, newest last (mirrors message/run ordering). */
+  images: GeneratedImage[];
+  createdAt: number;
+  updatedAt: number;
+  /**
+   * Organization metadata, shared with conversations and workspaces so the
+   * Library window lists all three together (see Conversation).
    */
   folderId?: string;
   tagIds?: string[];
@@ -344,7 +460,18 @@ export interface Endpoint {
    * line when edited in the UI.
    */
   manualModels?: string[];
+  /**
+   * What this endpoint serves, used to filter the model pickers. "text" shows
+   * its models only in chat/workspace, "image" only in the image studio,
+   * "both" everywhere. Unset is treated as "both" so existing endpoints keep
+   * appearing everywhere until tagged. Lets you keep a chat LLM out of the
+   * image picker and a diffusion server out of the chat picker.
+   */
+  kind?: EndpointKind;
 }
+
+/** Which kind of model an endpoint serves; gates where it shows in the UI. */
+export type EndpointKind = "text" | "image" | "both";
 
 /**
  * A fully-qualified model reference: which endpoint, which model id on it.
@@ -495,6 +622,8 @@ export interface Settings {
   defaultConversationModel?: string;
   /** Default model key for new workspaces. */
   defaultWorkspaceModel?: string;
+  /** Default model key for new image studios (an image-generation model). */
+  defaultImageModel?: string;
   username: string;
   /** Tool availability and parameters (web search/fetch, built-ins). */
   tools: ToolSettings;
@@ -663,6 +792,7 @@ export interface UserUiState {
 export interface UserStateSnapshot {
   conversations: Record<string, Conversation>;
   workspaces: Record<string, Workspace>;
+  imageStudios: Record<string, ImageStudio>;
   memories: Record<string, Memory>;
   skills: Record<string, Skill>;
   systemPrompts: Record<string, SystemPrompt>;
