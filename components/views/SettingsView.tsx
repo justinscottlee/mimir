@@ -12,12 +12,23 @@ import { modelKey } from "@/lib/types";
 import ConfirmDelete from "../ConfirmDelete";
 import type { Endpoint, EndpointKind } from "@/lib/types";
 import { IconPlus } from "../icons";
+import * as Icons from "../icons";
+import {
+  parseTransferFile,
+  serializeBackup,
+  serializeMemories,
+  serializeSkills,
+  serializeSystemPrompts,
+  dateStamp,
+} from "@/lib/transfer";
+import { downloadText, pickFiles } from "@/lib/clientFiles";
 
-type Section = "models" | "system" | "account";
+type Section = "models" | "system" | "data" | "account";
 
 const SECTIONS: { id: Section; label: string }[] = [
   { id: "models", label: "Models & Endpoints" },
   { id: "system", label: "System" },
+  { id: "data", label: "Data" },
   { id: "account", label: "Account" },
 ];
 
@@ -48,6 +59,7 @@ export default function SettingsView() {
       <div className="min-h-0 flex-1 overflow-y-auto">
         {section === "models" && <ModelsSection />}
         {section === "system" && <SystemSection />}
+        {section === "data" && <DataSection />}
         {section === "account" && <AccountSection />}
       </div>
     </div>
@@ -590,6 +602,315 @@ function SystemSection() {
         pointed at. Nothing is sent anywhere else unless you configure an
         externally hosted endpoint or a remote SearXNG.
       </p>
+    </div>
+  );
+}
+
+/* -------------------------------- Data --------------------------------- */
+
+function DataSection() {
+  const conversations = useMimir((s) => s.conversations);
+  const workspaces = useMimir((s) => s.workspaces);
+  const imageStudios = useMimir((s) => s.imageStudios);
+  const memories = useMimir((s) => s.memories);
+  const skills = useMimir((s) => s.skills);
+  const systemPrompts = useMimir((s) => s.systemPrompts);
+  const settings = useMimir((s) => s.settings);
+
+  const importMemories = useMimir((s) => s.importMemories);
+  const importSkills = useMimir((s) => s.importSkills);
+  const importSystemPrompts = useMimir((s) => s.importSystemPrompts);
+  const applyBackup = useMimir((s) => s.applyBackup);
+
+  const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const counts = {
+    conversations: Object.keys(conversations).length,
+    workspaces: Object.keys(workspaces).length,
+    imageStudios: Object.keys(imageStudios).length,
+    memories: Object.keys(memories).length,
+    skills: Object.keys(skills).length,
+    prompts: Object.values(systemPrompts).filter((p) => p.source === "user").length,
+  };
+
+  function exportBackup() {
+    const json = serializeBackup({
+      conversations: Object.values(conversations),
+      workspaces: Object.values(workspaces),
+      imageStudios: Object.values(imageStudios),
+      memories: Object.values(memories),
+      skills: Object.values(skills),
+      systemPrompts: Object.values(systemPrompts),
+      settings,
+    });
+    downloadText(`mimir-backup-${dateStamp()}.json`, json);
+    setStatus({ ok: true, text: "Exported a full account backup." });
+  }
+
+  async function importBackup() {
+    setStatus(null);
+    setBusy(true);
+    try {
+      const files = await pickFiles(".json,application/json", false);
+      if (files.length === 0) return;
+      const text = await files[0].text();
+      const parsed = parseTransferFile(text, files[0].name);
+      if (parsed.kind === "error") {
+        setStatus({ ok: false, text: parsed.error });
+        return;
+      }
+      if (parsed.kind !== "backup") {
+        setStatus({
+          ok: false,
+          text: `That file is a ${parsed.kind} export, not a full backup. Use the matching importer below, or import conversations from the Library.`,
+        });
+        return;
+      }
+      const r = applyBackup({
+        conversations: parsed.conversations,
+        workspaces: parsed.workspaces,
+        imageStudios: parsed.imageStudios,
+        memories: parsed.memories,
+        skills: parsed.skills,
+        systemPrompts: parsed.systemPrompts,
+        settings: parsed.settings,
+      });
+      const parts = [
+        `${r.conversations} chats`,
+        `${r.workspaces} workspaces`,
+        `${r.imageStudios} image studios`,
+        `${r.memories} memories`,
+        `${r.skills} skills`,
+        `${r.systemPrompts} prompts`,
+      ];
+      if (r.endpointsAdded) parts.push(`${r.endpointsAdded} endpoints`);
+      setStatus({ ok: true, text: `Imported ${parts.join(", ")}.` });
+    } catch (e) {
+      setStatus({ ok: false, text: (e as Error).message || "Import failed." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Bulk-import a single collection (memories / skills / prompts) from a file. */
+  async function importCollection(kind: "memories" | "skills" | "systemPrompts") {
+    setStatus(null);
+    setBusy(true);
+    try {
+      const files = await pickFiles(".json,application/json", false);
+      if (files.length === 0) return;
+      const text = await files[0].text();
+      const parsed = parseTransferFile(text, files[0].name);
+      if (parsed.kind === "error") {
+        setStatus({ ok: false, text: parsed.error });
+        return;
+      }
+      // Accept either the matching collection file or a full backup (pull the
+      // matching slice out of it).
+      let n = 0;
+      if (kind === "memories") {
+        const items = parsed.kind === "memories" ? parsed.items : parsed.kind === "backup" ? parsed.memories : null;
+        if (!items) return wrongFile(parsed.kind, "memories");
+        n = importMemories(items);
+      } else if (kind === "skills") {
+        const items = parsed.kind === "skills" ? parsed.items : parsed.kind === "backup" ? parsed.skills : null;
+        if (!items) return wrongFile(parsed.kind, "skills");
+        n = importSkills(items);
+      } else {
+        const items =
+          parsed.kind === "systemPrompts" ? parsed.items : parsed.kind === "backup" ? parsed.systemPrompts : null;
+        if (!items) return wrongFile(parsed.kind, "system prompts");
+        n = importSystemPrompts(items);
+      }
+      const noun =
+        kind === "memories" ? "memories" : kind === "skills" ? "skills" : "system prompts";
+      setStatus({ ok: true, text: `Imported ${n} ${noun}.` });
+    } catch (e) {
+      setStatus({ ok: false, text: (e as Error).message || "Import failed." });
+    } finally {
+      setBusy(false);
+    }
+
+    function wrongFile(got: string, want: string) {
+      setStatus({
+        ok: false,
+        text: `That file is a ${got} export, not ${want}.`,
+      });
+    }
+  }
+
+  return (
+    <div className="p-4 md:p-5">
+      <SectionHeading
+        title="Backup & restore"
+        subtitle="Export everything in your account to a single JSON file, or import one back. Imports are additive — they add to your current data and never overwrite it."
+      />
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <DataCard
+          title="Export account backup"
+          body={`A complete snapshot: ${counts.conversations} chats, ${counts.workspaces} workspaces, ${counts.imageStudios} image studios, ${counts.memories} memories, ${counts.skills} skills, ${counts.prompts} custom prompts, plus endpoints and settings.`}
+          action="Download backup"
+          icon={<Icons.IconDownload className="h-4 w-4" />}
+          onClick={exportBackup}
+          disabled={busy}
+        />
+        <DataCard
+          title="Import / restore"
+          body="Load a Mimir backup file. Chats, workspaces, and studios are added as new items; endpoints and pricing are merged in. Existing data is untouched."
+          action="Choose backup file…"
+          icon={<Icons.IconUpload className="h-4 w-4" />}
+          onClick={importBackup}
+          disabled={busy}
+        />
+      </div>
+
+      <p className="mt-3 rounded-md border border-bronze-600/30 bg-bronze-600/5 px-3 py-2 text-[11px] leading-relaxed text-parchment-500">
+        A backup includes your endpoint API keys in plain text. Store the file
+        somewhere safe and don&apos;t share it.
+      </p>
+
+      <SectionHeading
+        className="mt-8"
+        title="Bulk import"
+        subtitle="Import memories, skills, or system prompts from a JSON file — either a collection exported below, a slice of a backup, or a plain array of items."
+      />
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <CollectionCard
+          title="Memories"
+          count={counts.memories}
+          onExport={() => {
+            downloadText(
+              `mimir-memories-${dateStamp()}.json`,
+              serializeMemories(Object.values(memories))
+            );
+            setStatus({ ok: true, text: "Exported memories." });
+          }}
+          onImport={() => importCollection("memories")}
+          disabled={busy}
+        />
+        <CollectionCard
+          title="Skills"
+          count={counts.skills}
+          onExport={() => {
+            downloadText(
+              `mimir-skills-${dateStamp()}.json`,
+              serializeSkills(Object.values(skills))
+            );
+            setStatus({ ok: true, text: "Exported skills." });
+          }}
+          onImport={() => importCollection("skills")}
+          disabled={busy}
+        />
+        <CollectionCard
+          title="System prompts"
+          count={counts.prompts}
+          onExport={() => {
+            downloadText(
+              `mimir-prompts-${dateStamp()}.json`,
+              serializeSystemPrompts(Object.values(systemPrompts))
+            );
+            setStatus({ ok: true, text: "Exported custom system prompts." });
+          }}
+          onImport={() => importCollection("systemPrompts")}
+          disabled={busy}
+        />
+      </div>
+
+      {status && (
+        <div
+          className={[
+            "mt-5 flex items-start gap-2 rounded-md border px-3 py-2 text-sm",
+            status.ok
+              ? "border-signal-ok/40 bg-signal-ok/10 text-signal-ok"
+              : "border-signal-err/40 bg-signal-err/10 text-signal-err",
+          ].join(" ")}
+          role="status"
+        >
+          <span className="flex-1">{status.text}</span>
+          <button
+            onClick={() => setStatus(null)}
+            className="shrink-0 opacity-70 hover:opacity-100"
+            aria-label="Dismiss"
+          >
+            <Icons.IconX className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DataCard({
+  title,
+  body,
+  action,
+  icon,
+  onClick,
+  disabled,
+}: {
+  title: string;
+  body: string;
+  action: string;
+  icon: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex flex-col rounded-lg border border-ink-700 bg-ink-900 p-4">
+      <h3 className="text-sm font-medium text-parchment-100">{title}</h3>
+      <p className="mt-1 flex-1 text-xs leading-relaxed text-parchment-500">{body}</p>
+      <button
+        onClick={onClick}
+        disabled={disabled}
+        className="mt-3 flex items-center justify-center gap-1.5 rounded-md bg-bronze-500 px-3 py-2 text-sm font-medium text-ink-950 transition-colors hover:bg-bronze-400 disabled:opacity-40"
+      >
+        {icon}
+        {action}
+      </button>
+    </div>
+  );
+}
+
+function CollectionCard({
+  title,
+  count,
+  onExport,
+  onImport,
+  disabled,
+}: {
+  title: string;
+  count: number;
+  onExport: () => void;
+  onImport: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="rounded-lg border border-ink-700 bg-ink-900 p-3">
+      <div className="flex items-baseline justify-between">
+        <h3 className="text-sm font-medium text-parchment-100">{title}</h3>
+        <span className="font-mono text-[11px] text-parchment-600">{count}</span>
+      </div>
+      <div className="mt-2.5 flex gap-2">
+        <button
+          onClick={onExport}
+          disabled={disabled || count === 0}
+          className="flex flex-1 items-center justify-center gap-1 rounded-md border border-ink-700 px-2 py-1.5 text-xs text-parchment-300 transition-colors hover:bg-ink-800 hover:text-parchment-100 disabled:opacity-40"
+        >
+          <Icons.IconDownload className="h-3.5 w-3.5" />
+          Export
+        </button>
+        <button
+          onClick={onImport}
+          disabled={disabled}
+          className="flex flex-1 items-center justify-center gap-1 rounded-md border border-ink-700 px-2 py-1.5 text-xs text-parchment-300 transition-colors hover:bg-ink-800 hover:text-parchment-100 disabled:opacity-40"
+        >
+          <Icons.IconUpload className="h-3.5 w-3.5" />
+          Import
+        </button>
+      </div>
     </div>
   );
 }

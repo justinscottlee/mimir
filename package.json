@@ -28,6 +28,7 @@
     "react-syntax-highlighter": "^16.1.1",
     "remark-gfm": "^4.0.1",
     "tar-stream": "^3.2.0",
+    "unpdf": "^1.6.2",
     "zustand": "^4.5.5"
   },
   "devDependencies": {

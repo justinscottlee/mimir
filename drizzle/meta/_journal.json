@@ -50,6 +50,20 @@
       "when": 1782146841287,
       "tag": "0006_fancy_dark_phoenix",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1782166888068,
+      "tag": "0007_workspace_run_meta",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1782167555842,
+      "tag": "0008_message_attachments",
+      "breakpoints": true
     }
   ]
 }

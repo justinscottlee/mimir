@@ -16,6 +16,13 @@ import {
 import InlineRename from "@/components/InlineRename";
 import * as Icons from "../icons";
 import ConfirmDelete from "../ConfirmDelete";
+import {
+  parseTransferFile,
+  serializeConversationJSON,
+  serializeConversationMarkdown,
+  slugify,
+} from "@/lib/transfer";
+import { downloadText, pickFiles } from "@/lib/clientFiles";
 
 /**
  * The Library: one window that lists conversations AND workspaces together
@@ -84,6 +91,134 @@ export default function LibraryView() {
   const toggleItemTag = useMimir((s) => s.toggleItemTag);
   const deleteConversations = useMimir((s) => s.deleteConversations);
   const deleteImageStudios = useMimir((s) => s.deleteImageStudios);
+  const importConversations = useMimir((s) => s.importConversations);
+  const importWorkspaces = useMimir((s) => s.importWorkspaces);
+  const importImageStudios = useMimir((s) => s.importImageStudios);
+  const applyBackup = useMimir((s) => s.applyBackup);
+
+  // Transient status line under the toolbar after an import.
+  const [importStatus, setImportStatus] = useState<string | null>(null);
+
+  /**
+   * Exports one library item to a downloaded file. Conversations support both
+   * Markdown (readable) and JSON (lossless); workspaces and image studios export
+   * as JSON only (there's no sensible Markdown rendering of a filesystem or a
+   * gallery). Reads the full object straight from the store.
+   */
+  function exportItem(it: LibItem, format: "json" | "md") {
+    const stamp = slugify(it.title || it.kind);
+    if (it.kind === "chat") {
+      const conv = conversations[it.id];
+      if (!conv) return;
+      if (format === "md") {
+        downloadText(`${stamp}.md`, serializeConversationMarkdown(conv), "text/markdown");
+      } else {
+        downloadText(`${stamp}.json`, serializeConversationJSON(conv));
+      }
+    } else if (it.kind === "workspace") {
+      const ws = workspaces[it.id];
+      if (!ws) return;
+      downloadText(
+        `${stamp}.workspace.json`,
+        JSON.stringify(
+          { type: "mimir.workspace", version: 1, exportedAt: Date.now(), workspace: ws },
+          null,
+          2
+        )
+      );
+    } else {
+      const st = imageStudios[it.id];
+      if (!st) return;
+      downloadText(
+        `${stamp}.studio.json`,
+        JSON.stringify(
+          { type: "mimir.imageStudio", version: 1, exportedAt: Date.now(), studio: st },
+          null,
+          2
+        )
+      );
+    }
+  }
+
+  /**
+   * Imports conversations/workspaces/studios from picked files. Accepts a single
+   * conversation (JSON or our Markdown), a bare workspace/studio JSON, or a full
+   * backup (whose library items are all added). Memory/skill/prompt files are
+   * redirected to Settings, where bulk import for those lives.
+   */
+  async function handleImport() {
+    const files = await pickFiles(".json,.md,.markdown,application/json,text/markdown", true);
+    if (files.length === 0) return;
+
+    let chats = 0;
+    let wss = 0;
+    let imgs = 0;
+    const skipped: string[] = [];
+    let firstId: string | null = null;
+
+    for (const file of files) {
+      let text = "";
+      try {
+        text = await file.text();
+      } catch {
+        skipped.push(file.name);
+        continue;
+      }
+      // Bare workspace / studio envelopes aren't part of parseTransferFile's
+      // conversation/backup/collection vocabulary — handle them directly.
+      const direct = tryDirectWorkspaceOrStudio(text);
+      if (direct) {
+        if (direct.kind === "workspace") wss += importWorkspaces([direct.workspace]).length;
+        else imgs += importImageStudios([direct.studio]).length;
+        continue;
+      }
+
+      const parsed = parseTransferFile(text, file.name);
+      if (parsed.kind === "conversation") {
+        const ids = importConversations([parsed.conversation]);
+        chats += ids.length;
+        if (!firstId && ids[0]) firstId = ids[0];
+      } else if (parsed.kind === "backup") {
+        chats += importConversations(parsed.conversations).length;
+        wss += importWorkspaces(parsed.workspaces).length;
+        imgs += importImageStudios(parsed.imageStudios).length;
+        // A backup also carries memories/skills/prompts; pull those in too.
+        if (
+          parsed.memories.length ||
+          parsed.skills.length ||
+          parsed.systemPrompts.length ||
+          parsed.settings
+        ) {
+          applyBackup({
+            conversations: [],
+            workspaces: [],
+            imageStudios: [],
+            memories: parsed.memories,
+            skills: parsed.skills,
+            systemPrompts: parsed.systemPrompts,
+            settings: parsed.settings,
+          });
+        }
+      } else if (
+        parsed.kind === "memories" ||
+        parsed.kind === "skills" ||
+        parsed.kind === "systemPrompts"
+      ) {
+        skipped.push(`${file.name} (import ${parsed.kind} from Settings → Data)`);
+      } else {
+        skipped.push(`${file.name} (${parsed.error})`);
+      }
+    }
+
+    const parts: string[] = [];
+    if (chats) parts.push(`${chats} chat${chats === 1 ? "" : "s"}`);
+    if (wss) parts.push(`${wss} workspace${wss === 1 ? "" : "s"}`);
+    if (imgs) parts.push(`${imgs} image studio${imgs === 1 ? "" : "s"}`);
+    let msg = parts.length ? `Imported ${parts.join(", ")}.` : "Nothing imported.";
+    if (skipped.length) msg += ` Skipped: ${skipped.join("; ")}.`;
+    setImportStatus(msg);
+    if (firstId) openConversation(firstId);
+  }
 
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
@@ -418,6 +553,14 @@ export default function LibraryView() {
             </label>
             <div className="flex-1" />
             <button
+              onClick={handleImport}
+              title="Import conversations, workspaces, or a backup from a file"
+              className="flex items-center gap-1 rounded-md border border-ink-700 px-2 py-1 text-xs text-parchment-400 transition-colors hover:bg-ink-800 hover:text-parchment-100"
+            >
+              <Icons.IconUpload className="h-4 w-4" />
+              Import
+            </button>
+            <button
               onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
               className={[
                 "flex items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors",
@@ -431,6 +574,19 @@ export default function LibraryView() {
               {selectMode ? "Done" : "Select"}
             </button>
           </div>
+
+          {importStatus && (
+            <div className="mt-2 flex items-start gap-2 rounded-md border border-ink-700 bg-ink-850 px-2.5 py-1.5 text-xs text-parchment-300">
+              <span className="flex-1">{importStatus}</span>
+              <button
+                onClick={() => setImportStatus(null)}
+                className="shrink-0 text-parchment-600 hover:text-parchment-100"
+                aria-label="Dismiss"
+              >
+                <Icons.IconX className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
 
           {/* Tag filter + management */}
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -551,6 +707,7 @@ export default function LibraryView() {
                         ? deleteImageStudio(it.id)
                         : deleteWorkspace(it.id)
                     }
+                    onExport={(format) => exportItem(it, format)}
                   />
                 ))}
               </ul>
@@ -954,6 +1111,7 @@ function ItemRow({
   onMoveFolder,
   onRename,
   onDelete,
+  onExport,
 }: {
   item: LibItem;
   folders: Folder[];
@@ -966,6 +1124,7 @@ function ItemRow({
   onMoveFolder: (folderId: string | null) => void;
   onRename: (title: string) => void;
   onDelete: () => void;
+  onExport: (format: "json" | "md") => void;
 }) {
   const toggleItemTag = useMimir((s) => s.toggleItemTag);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
@@ -1102,6 +1261,7 @@ function ItemRow({
           onToggleTag={(tagId) => toggleItemTag(item.kind, item.id, tagId)}
           onRename={beginRename}
           onDelete={onDelete}
+          onExport={onExport}
         />
       )}
     </li>
@@ -1121,6 +1281,7 @@ function ItemMenu({
   onToggleTag,
   onRename,
   onDelete,
+  onExport,
 }: {
   x: number;
   y: number;
@@ -1134,6 +1295,7 @@ function ItemMenu({
   onToggleTag: (tagId: string) => void;
   onRename: () => void;
   onDelete: () => void;
+  onExport: (format: "json" | "md") => void;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -1160,6 +1322,27 @@ function ItemMenu({
         label="Rename"
         onClick={() => {
           onRename();
+          onClose();
+        }}
+      />
+
+      <ContextMenuSeparator />
+      <ContextMenuLabel>Export</ContextMenuLabel>
+      {item.kind === "chat" && (
+        <ContextMenuItem
+          icon={<Icons.IconDownload className="h-4 w-4" />}
+          label="Export as Markdown"
+          onClick={() => {
+            onExport("md");
+            onClose();
+          }}
+        />
+      )}
+      <ContextMenuItem
+        icon={<Icons.IconDownload className="h-4 w-4" />}
+        label="Export as JSON"
+        onClick={() => {
+          onExport("json");
           onClose();
         }}
       />
@@ -1265,4 +1448,33 @@ function SegBtn({
       {label}
     </button>
   );
+}
+
+/**
+ * Recognizes the bare workspace / image-studio export envelopes the Library
+ * writes (these aren't part of the shared transfer vocabulary, which is
+ * conversation/backup/collection-oriented). Returns null for anything else so
+ * the caller falls back to parseTransferFile.
+ */
+function tryDirectWorkspaceOrStudio(
+  text: string
+):
+  | { kind: "workspace"; workspace: import("@/lib/types").Workspace }
+  | { kind: "studio"; studio: import("@/lib/types").ImageStudio }
+  | null {
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof json !== "object" || json === null) return null;
+  const obj = json as Record<string, unknown>;
+  if (obj.type === "mimir.workspace" && obj.workspace) {
+    return { kind: "workspace", workspace: obj.workspace as import("@/lib/types").Workspace };
+  }
+  if (obj.type === "mimir.imageStudio" && obj.studio) {
+    return { kind: "studio", studio: obj.studio as import("@/lib/types").ImageStudio };
+  }
+  return null;
 }

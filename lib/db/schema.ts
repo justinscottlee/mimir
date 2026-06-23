@@ -141,6 +141,8 @@ export const messages = pgTable(
     meta: jsonb("meta"),
     /** ToolEventRecord[] — inline tool chips captured during generation. */
     toolEvents: jsonb("tool_events"),
+    /** Attachment[] — files attached to a user message and injected as context. */
+    attachments: jsonb("attachments"),
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
   },
   (t) => ({
@@ -226,6 +228,14 @@ export const workspaceRuns = pgTable(
     totalTokens: integer("total_tokens").notNull().default(0),
     /** AgentStep[] */
     steps: jsonb("steps").notNull().default([]),
+    /**
+     * The resumable-agent extensions that don't warrant their own columns:
+     * `{ prompts, plan, title, turns }`. Stored as jsonb (like messages.meta)
+     * so a run's prompt history, live checklist plan, and per-turn outcomes
+     * survive a reload — without these the plan and pinned turn summaries
+     * vanish when the workspace is reopened, and resume can't replay turns.
+     */
+    meta: jsonb("meta"),
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
     finishedAt: timestamp("finished_at", { mode: "date" }),
   },

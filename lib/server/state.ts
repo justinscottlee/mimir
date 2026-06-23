@@ -226,6 +226,7 @@ async function readUserState(
       interrupted: m.interrupted ?? undefined,
       meta: (m.meta as MessageMeta | null) ?? undefined,
       toolEvents: (m.toolEvents as ToolEventRecord[] | null) ?? undefined,
+      attachments: (m.attachments as Message["attachments"]) ?? undefined,
     });
     msgsByConv.set(m.conversationId, list);
   }
@@ -264,6 +265,10 @@ async function readUserState(
   const runsByWs = new Map<string, AgentRun[]>();
   for (const { r } of wrRows) {
     const list = runsByWs.get(r.workspaceId) ?? [];
+    // The resumable-agent extensions ride in `meta` jsonb (see schema). Pull
+    // them back out so the plan, prompt history, and per-turn outcomes survive
+    // a reload rather than resetting to empty.
+    const meta = (r.meta as Partial<AgentRun> | null) ?? {};
     list.push({
       id: r.id,
       goal: r.goal,
@@ -275,6 +280,10 @@ async function readUserState(
       totalTokens: r.totalTokens ?? 0,
       createdAt: ms(r.createdAt),
       finishedAt: r.finishedAt ? ms(r.finishedAt) : undefined,
+      prompts: meta.prompts,
+      plan: meta.plan,
+      title: meta.title,
+      turns: meta.turns,
     });
     runsByWs.set(r.workspaceId, list);
   }
@@ -492,6 +501,7 @@ export async function upsertConversation(
           interrupted: m.interrupted ?? null,
           meta: m.meta ?? null,
           toolEvents: m.toolEvents ?? null,
+          attachments: m.attachments ?? null,
           createdAt: toDate(m.createdAt),
         }))
       );
@@ -588,6 +598,14 @@ export async function upsertWorkspace(
           error: r.error ?? null,
           totalTokens: r.totalTokens ?? 0,
           steps: r.steps ?? [],
+          // Persist the resumable-agent extensions together in jsonb so the
+          // plan, prompt history, and turn outcomes round-trip (see schema).
+          meta: {
+            prompts: r.prompts,
+            plan: r.plan,
+            title: r.title,
+            turns: r.turns,
+          },
           createdAt: toDate(r.createdAt),
           finishedAt: r.finishedAt ? toDate(r.finishedAt) : null,
         }))

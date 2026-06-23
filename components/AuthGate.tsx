@@ -15,17 +15,21 @@ type Mode = "signin" | "signup";
 export default function AuthGate() {
   const [mode, setMode] = useState<Mode>("signin");
   const [allowSignup, setAllowSignup] = useState(true);
+  const [googleEnabled, setGoogleEnabled] = useState(false);
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const [oauthBusy, setOauthBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const emailRef = useRef<HTMLInputElement>(null);
 
-  // Learn whether registration is open so we can hide the sign-up affordance on
-  // locked-down deployments. Defaults to allowed if the probe fails.
+  // Learn whether registration is open (to hide the sign-up affordance on
+  // locked-down deployments) and which OAuth providers are configured (to show
+  // their buttons only when they'll work). Defaults are conservative if the
+  // probe fails: sign-up allowed, no social buttons.
   useEffect(() => {
     let cancelled = false;
     fetch("/api/auth-config")
@@ -34,6 +38,7 @@ export default function AuthGate() {
         if (cancelled || !cfg) return;
         setAllowSignup(Boolean(cfg.allowSignup));
         if (!cfg.allowSignup) setMode("signin");
+        setGoogleEnabled(Boolean(cfg.social?.google));
       })
       .catch(() => {});
     return () => {
@@ -44,6 +49,27 @@ export default function AuthGate() {
   useEffect(() => {
     emailRef.current?.focus();
   }, [mode]);
+
+  async function signInWithGoogle() {
+    setError(null);
+    setOauthBusy(true);
+    try {
+      // Better Auth redirects the browser to Google and back to callbackURL;
+      // the session cookie is set on return and the shell picks it up. If the
+      // call returns an error instead of redirecting, surface it.
+      const { error } = await signIn.social({
+        provider: "google",
+        callbackURL: window.location.origin,
+      });
+      if (error) {
+        setError(error.message || "Could not sign in with Google.");
+        setOauthBusy(false);
+      }
+    } catch {
+      setError("Could not start Google sign-in. Please try again.");
+      setOauthBusy(false);
+    }
+  }
 
   async function submit() {
     setError(null);
@@ -114,6 +140,31 @@ export default function AuthGate() {
         </div>
 
         <div className="rounded-lg border border-ink-800 bg-ink-900 p-6">
+          {googleEnabled && (
+            <>
+              <button
+                type="button"
+                onClick={signInWithGoogle}
+                disabled={oauthBusy || busy}
+                className="flex w-full items-center justify-center gap-2.5 rounded-md border border-ink-700 bg-ink-850 px-4 py-2.5 text-sm font-medium text-parchment-100 transition-colors hover:bg-ink-800 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <GoogleMark />
+                {oauthBusy
+                  ? "Redirecting to Google…"
+                  : mode === "signin"
+                    ? "Continue with Google"
+                    : "Sign up with Google"}
+              </button>
+              <div className="my-4 flex items-center gap-3">
+                <span className="h-px flex-1 bg-ink-800" />
+                <span className="text-[11px] uppercase tracking-wide text-parchment-600">
+                  or
+                </span>
+                <span className="h-px flex-1 bg-ink-800" />
+              </div>
+            </>
+          )}
+
           <div className="flex flex-col gap-4" onKeyDown={onKeyDown}>
             {mode === "signup" && (
               <Field label="Name">
@@ -196,6 +247,30 @@ export default function AuthGate() {
 
 const inputClass =
   "w-full rounded-md border border-ink-700 bg-ink-950 px-3 py-2 text-sm text-parchment-100 placeholder:text-parchment-600 outline-none transition-colors focus:border-bronze-500";
+
+/** The official multicolor Google "G" mark, for the OAuth button. */
+function GoogleMark() {
+  return (
+    <svg className="h-4 w-4" viewBox="0 0 18 18" aria-hidden>
+      <path
+        fill="#4285F4"
+        d="M17.64 9.205c0-.639-.057-1.252-.164-1.841H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"
+      />
+      <path
+        fill="#34A853"
+        d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"
+      />
+      <path
+        fill="#EA4335"
+        d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"
+      />
+    </svg>
+  );
+}
 
 function Field({
   label,

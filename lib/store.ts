@@ -2,24 +2,18 @@
 
 import { create } from "zustand";
 import {
-  AgentRun,
-  AgentRunStatus,
-  AgentStep,
   Conversation,
   Endpoint,
   FloatingWindow,
   ImageStudio,
   Memory,
   Message,
-  PlanItem,
   Settings,
   Skill,
   SystemPrompt,
   Tab,
   TabKind,
-  ToolEventRecord,
   ToolSettings,
-  TurnOutcome,
   UserStateSnapshot,
   WindowKind,
   Workspace,
@@ -30,7 +24,6 @@ import {
   DEFAULT_AGENT_CONFIG,
   DEFAULT_IMAGE_PARAMS,
   DEFAULT_TOOL_SETTINGS,
-  MAX_WORKSPACE_RUNS,
   WINDOW_SPECS,
   defaultSettings,
   normalizeWindowKind,
@@ -46,6 +39,14 @@ import {
   createImageStudioSlice,
   ImageStudioSlice,
 } from "./store-slices/imageStudioSlice";
+import {
+  createTransferSlice,
+  TransferSlice,
+} from "./store-slices/transferSlice";
+import {
+  createWorkspaceRunSlice,
+  WorkspaceRunSlice,
+} from "./store-slices/workspaceRunSlice";
 import { isEmptyRef } from "./store-slices/isEmpty";
 
 // Re-exported so existing imports (`import { uid, useMimir, WINDOW_SPECS }
@@ -68,7 +69,11 @@ export interface PartialToolSettings {
 /** Lifecycle of the server-backed store. */
 export type StoreStatus = "idle" | "loading" | "ready" | "error";
 
-export interface MimirState extends OrganizationSlice, ImageStudioSlice {
+export interface MimirState
+  extends OrganizationSlice,
+    ImageStudioSlice,
+    TransferSlice,
+    WorkspaceRunSlice {
   /** Hydration lifecycle: idle (signed out) → loading → ready. */
   status: StoreStatus;
 
@@ -157,41 +162,7 @@ export interface MimirState extends OrganizationSlice, ImageStudioSlice {
     id: string,
     patch: Partial<WorkspaceAgentConfig>
   ) => void;
-  // Workspace agent runs
-  startWorkspaceRun: (id: string, run: AgentRun) => void;
-  updateWorkspaceRun: (
-    id: string,
-    runId: string,
-    patch: Partial<Omit<AgentRun, "id" | "steps">>
-  ) => void;
-  appendRunStep: (id: string, runId: string, step: AgentStep) => void;
-  patchRunStep: (
-    id: string,
-    runId: string,
-    stepIndex: number,
-    patch: Partial<Omit<AgentStep, "index">>
-  ) => void;
-  appendRunToolEvent: (
-    id: string,
-    runId: string,
-    stepIndex: number,
-    event: ToolEventRecord
-  ) => void;
-  deleteWorkspaceRun: (id: string, runId: string) => void;
-  clearWorkspaceRuns: (id: string) => void;
-  /**
-   * Append a new prompt to a run's history (used when re-prompting an existing
-   * agent). Returns the new turn index (0-based), or -1 if the run is missing.
-   */
-  appendRunPrompt: (id: string, runId: string, prompt: string) => number;
-  /** Replace a run's checklist plan (driven by the plan tools and user edits). */
-  setRunPlan: (id: string, runId: string, plan: PlanItem[]) => void;
-  /** Record how a turn ended, so its summary stays pinned inline to that turn. */
-  recordTurnOutcome: (
-    id: string,
-    runId: string,
-    outcome: TurnOutcome
-  ) => void;
+  // Workspace agent-run actions are provided by WorkspaceRunSlice (composed in).
 
   // Image studios
   newImageStudio: () => void;
@@ -751,191 +722,9 @@ export const useMimir = create<MimirState>()((set, get, store) => ({
       };
     }),
 
-  // ---------- Workspace agent runs ----------
-
-  startWorkspaceRun: (id, run) =>
-    set((s) => {
-      const ws = s.workspaces[id];
-      if (!ws) return s;
-      // Keep only the most recent runs to bound the stored workspace size.
-      const runs = [...ws.runs, run].slice(-MAX_WORKSPACE_RUNS);
-      return { workspaces: { ...s.workspaces, [id]: { ...ws, runs } } };
-    }),
-
-  updateWorkspaceRun: (id, runId, patch) =>
-    set((s) => {
-      const ws = s.workspaces[id];
-      if (!ws) return s;
-      return {
-        workspaces: {
-          ...s.workspaces,
-          [id]: {
-            ...ws,
-            runs: ws.runs.map((r) => (r.id === runId ? { ...r, ...patch } : r)),
-          },
-        },
-      };
-    }),
-
-  appendRunStep: (id, runId, step) =>
-    set((s) => {
-      const ws = s.workspaces[id];
-      if (!ws) return s;
-      return {
-        workspaces: {
-          ...s.workspaces,
-          [id]: {
-            ...ws,
-            runs: ws.runs.map((r) =>
-              r.id === runId ? { ...r, steps: [...r.steps, step] } : r
-            ),
-          },
-        },
-      };
-    }),
-
-  patchRunStep: (id, runId, stepIndex, patch) =>
-    set((s) => {
-      const ws = s.workspaces[id];
-      if (!ws) return s;
-      return {
-        workspaces: {
-          ...s.workspaces,
-          [id]: {
-            ...ws,
-            runs: ws.runs.map((r) =>
-              r.id === runId
-                ? {
-                    ...r,
-                    steps: r.steps.map((st) =>
-                      st.index === stepIndex ? { ...st, ...patch } : st
-                    ),
-                  }
-                : r
-            ),
-          },
-        },
-      };
-    }),
-
-  appendRunToolEvent: (id, runId, stepIndex, event) =>
-    set((s) => {
-      const ws = s.workspaces[id];
-      if (!ws) return s;
-      return {
-        workspaces: {
-          ...s.workspaces,
-          [id]: {
-            ...ws,
-            runs: ws.runs.map((r) =>
-              r.id === runId
-                ? {
-                    ...r,
-                    steps: r.steps.map((st) => {
-                      if (st.index !== stepIndex) return st;
-                      // Upsert by tool index: a tool first reports itself as
-                      // pending (so a live chip shows), then reports again with
-                      // its result, replacing the pending entry in place.
-                      const existing = st.toolEvents.findIndex(
-                        (e) => e.index === event.index
-                      );
-                      const toolEvents =
-                        existing >= 0
-                          ? st.toolEvents.map((e, i) =>
-                              i === existing ? event : e
-                            )
-                          : [...st.toolEvents, event];
-                      return { ...st, toolEvents };
-                    }),
-                  }
-                : r
-            ),
-          },
-        },
-      };
-    }),
-
-  deleteWorkspaceRun: (id, runId) =>
-    set((s) => {
-      const ws = s.workspaces[id];
-      if (!ws) return s;
-      return {
-        workspaces: {
-          ...s.workspaces,
-          [id]: { ...ws, runs: ws.runs.filter((r) => r.id !== runId) },
-        },
-      };
-    }),
-
-  appendRunPrompt: (id, runId, prompt) => {
-    let turnIndex = -1;
-    set((s) => {
-      const ws = s.workspaces[id];
-      if (!ws) return s;
-      return {
-        workspaces: {
-          ...s.workspaces,
-          [id]: {
-            ...ws,
-            runs: ws.runs.map((r) => {
-              if (r.id !== runId) return r;
-              const prompts = r.prompts ?? (r.goal ? [r.goal] : []);
-              const nextPrompts = [...prompts, prompt];
-              turnIndex = nextPrompts.length - 1;
-              return { ...r, prompts: nextPrompts };
-            }),
-          },
-        },
-      };
-    });
-    return turnIndex;
-  },
-
-  setRunPlan: (id, runId, plan) =>
-    set((s) => {
-      const ws = s.workspaces[id];
-      if (!ws) return s;
-      return {
-        workspaces: {
-          ...s.workspaces,
-          [id]: {
-            ...ws,
-            runs: ws.runs.map((r) => (r.id === runId ? { ...r, plan } : r)),
-          },
-        },
-      };
-    }),
-
-  recordTurnOutcome: (id, runId, outcome) =>
-    set((s) => {
-      const ws = s.workspaces[id];
-      if (!ws) return s;
-      return {
-        workspaces: {
-          ...s.workspaces,
-          [id]: {
-            ...ws,
-            runs: ws.runs.map((r) => {
-              if (r.id !== runId) return r;
-              const rest = (r.turns ?? []).filter(
-                (t) => t.turn !== outcome.turn
-              );
-              return {
-                ...r,
-                turns: [...rest, outcome].sort((a, b) => a.turn - b.turn),
-              };
-            }),
-          },
-        },
-      };
-    }),
-
-  clearWorkspaceRuns: (id) =>
-    set((s) => {
-      const ws = s.workspaces[id];
-      if (!ws) return s;
-      return { workspaces: { ...s.workspaces, [id]: { ...ws, runs: [] } } };
-    }),
+  // ---------- Workspace agent runs (extracted slice) ----------
+  // The run-streaming mutations (start/append/patch/plan/turn-outcome) live in
+  // store-slices/workspaceRunSlice, composed below.
 
   // ---------- Image studios ----------
 
@@ -1277,6 +1066,12 @@ export const useMimir = create<MimirState>()((set, get, store) => ({
 
   // ---------- Image-studio gallery + composer (extracted slice) ----------
   ...createImageStudioSlice(set, get, store),
+
+  // ---------- Import / restore (extracted slice) ----------
+  ...createTransferSlice(set, get, store),
+
+  // ---------- Workspace agent runs (extracted slice) ----------
+  ...createWorkspaceRunSlice(set, get, store),
 
   setSearchOpen: (open) => set({ searchOpen: open }),
 }));

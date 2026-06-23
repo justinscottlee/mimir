@@ -70,6 +70,42 @@ export interface Message {
    * inline and survive reload.
    */
   toolEvents?: ToolEventRecord[];
+  /**
+   * Files the user attached to this message as context. The extracted text is
+   * injected ahead of the message's prose on every request that includes this
+   * message (direct context injection — see lib/attachments.ts), so the model
+   * always sees the file contents while the chat shows compact chips. Only set
+   * on user messages.
+   */
+  attachments?: Attachment[];
+}
+
+/**
+ * A file attached to a chat message and injected into the model's context as
+ * text. Binary formats that aren't text and aren't extractable (images,
+ * archives) are rejected at attach time, so an attachment always carries usable
+ * `text`. Persisted on the message (jsonb) so the context survives a reload.
+ */
+export interface Attachment {
+  id: string;
+  /** Original filename, e.g. "report.pdf" or "main.c". */
+  name: string;
+  /** Best-effort MIME type reported by the browser, e.g. "application/pdf". */
+  mimeType?: string;
+  /** Size of the original file in bytes. */
+  size: number;
+  /**
+   * How the file became context:
+   *  - "text": decoded directly as UTF-8 (code, markdown, csv, plain text, …)
+   *  - "pdf":  text extracted from a PDF server-side (lib/attachments + /api/extract)
+   */
+  kind: "text" | "pdf";
+  /** The extracted text injected into the model's context. */
+  text: string;
+  /** Page count for PDFs (informational, shown on the chip). */
+  pages?: number;
+  /** True if `text` was truncated to fit the per-file size cap. */
+  truncated?: boolean;
 }
 
 /** Persisted form of a tool event (mirrors ToolEvent in lib/tools.ts). */

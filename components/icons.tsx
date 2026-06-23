@@ -259,6 +259,16 @@ export const IconUpload = (p: IconProps) => (
         <path d="M8 10.67V2M8 2L4.67 5.33M8 2L11.33 5.33M2.67 13.33H13.33" />
     </Svg>
 );
+export const IconPaperclip = (p: IconProps) => (
+    <Svg {...p}>
+        <path d="M13 7.33L7.83 12.5C6.55 13.78 4.45 13.78 3.17 12.5C1.89 11.22 1.89 9.12 3.17 7.83L8.5 2.5C9.35 1.65 10.75 1.65 11.6 2.5C12.45 3.35 12.45 4.75 11.6 5.6L6.4 10.8C5.97 11.23 5.27 11.23 4.85 10.8C4.42 10.38 4.42 9.68 4.85 9.25L9.67 4.43" />
+    </Svg>
+);
+export const IconX = (p: IconProps) => (
+    <Svg {...p}>
+        <path d="M4 4L12 12M12 4L4 12" />
+    </Svg>
+);
 export const IconCoin = (p: IconProps) => (
     <Svg {...p}>
         <circle cx="8" cy="8" r="5.33" />

@@ -46,6 +46,7 @@ Linux sandbox to write code, run it, read the errors, and fix them).
   - [Web tools (search & fetch)](#web-tools-search--fetch)
   - [Context management](#context-management)
   - [Workspaces (agentic sandboxes)](#workspaces-agentic-sandboxes)
+  - [Export, import & backup](#export-import--backup)
 - [Architecture](#architecture)
 - [Getting started](#getting-started)
 - [Configuration reference](#configuration-reference)
@@ -68,7 +69,9 @@ Linux sandbox to write code, run it, read the errors, and fix them).
 - **A real chat client.** Streamed Markdown with syntax-highlighted, copyable,
   collapsible code blocks; a collapsible reasoning panel with a live "thinking"
   timer; per-message generation stats (tok/s, context usage, wall time); resend,
-  copy, and delete actions; clean stop-mid-stream handling.
+  copy, and delete actions; clean stop-mid-stream handling. Attach text files or
+  PDFs (drag-and-drop or the paperclip) and their contents are injected straight
+  into the model's context.
 - **Long-term memory.** The model remembers durable facts about you across
   every conversation — and you can see, edit, disable, or delete every memory it
   saves, because *you* own the write, not the model.
@@ -94,9 +97,14 @@ Linux sandbox to write code, run it, read the errors, and fix them).
   file editor with live HTML/Markdown/SVG preview (and image preview for binary
   files); a per-workspace sandbox network toggle; and one-click "download as
   zip." Agents can optionally search and fetch the web mid-run.
-- **Multi-user & self-hosted.** Email + password accounts (Better Auth), every
-  row scoped to its owner, a one-flag switch to lock down sign-ups. Everything
-  persists to PostgreSQL, cached in Valkey.
+- **Export, import & backup.** Export any conversation as readable Markdown or
+  lossless JSON, or take a full account backup (chats, workspaces, image
+  studios, memories, skills, prompts, endpoints) as a single JSON file. Import
+  it back into any instance, and bulk-import collections of memories, skills, or
+  system prompts. Imports are additive — they never overwrite what you have.
+- **Multi-user & self-hosted.** Email + password accounts plus optional Google
+  sign-in (Better Auth), every row scoped to its owner, a one-flag switch to
+  lock down sign-ups. Everything persists to PostgreSQL, cached in Valkey.
 - **One command to run it all.** `docker compose up --build` brings up the app,
   Postgres, Valkey, and SearXNG together, with the host Docker socket wired in so
   workspaces can execute code out of the box.
@@ -236,6 +244,16 @@ Mimir reads `/v1/models` to populate the picker and streams completions from
   expandable to the tool's result, so the timeline reflects the real order of
   thinking, tools, and prose. Expanding a `remember` chip offers a Delete-memory
   button so you can undo a save in place.
+- **File attachments (context injection).** Attach text-like files (code,
+  Markdown, CSV, JSON, plain text) or PDFs to a message — click the paperclip or
+  drag-and-drop onto the composer. Text files are decoded in the browser; PDFs
+  are sent to a small server route that extracts their text with `pdfjs`. The
+  extracted content is wrapped in a labeled fence and prepended to your message
+  on **every** request that includes it, so the file stays in context across
+  turns and survives a reload (it's persisted on the message, not pasted once).
+  Attachments show as compact chips on the composer and on the sent message;
+  binary files that aren't text or PDF are rejected up front with a clear note.
+  Per-file and per-message size caps keep one big file from flooding the window.
 - **Message actions** on hover: copy and delete on every message; resend on user
   messages (truncates everything after and regenerates). Deletes ask for inline
   confirmation rather than nuking on a single misclick.
@@ -528,6 +546,33 @@ isolation is best-effort, not a guarantee — see the
 > `run_command` just report the sandbox as unavailable, and the agent is told to
 > fall back to writing files and explaining how to run them.
 
+### Export, import & backup
+
+Your data is yours, and it moves. All of this is client-side serialization to a
+downloaded file (and parsing on the way back); there are no new endpoints.
+
+- **Per-conversation export** lives in the **Library** (right-click a row, or the
+  ⋯ menu). Conversations export as **Markdown** (a clean, readable transcript —
+  thinking becomes labeled blockquotes, tool calls become inline notes) or
+  **JSON** (a lossless envelope that round-trips exactly, attachments included).
+  Workspaces and image studios export as JSON.
+- **Conversation import** is the Library's **Import** button: pick one or more
+  `.json` / `.md` files. It accepts our conversation JSON, our Markdown format, a
+  bare workspace/studio export, or a full backup (whose library items are all
+  pulled in). Imported chats open immediately.
+- **Full account backup** lives in **Settings → Data**: one JSON file containing
+  every conversation, workspace, image studio, memory, skill, custom prompt, plus
+  your endpoints and settings. Restore it into any instance from the same screen.
+- **Bulk collection import** (also Settings → Data) brings in arrays of
+  **memories**, **skills**, or **system prompts** — from a collection exported
+  there, a slice of a backup, or a plain JSON array.
+- **Additive by design.** Every import adds *new* items with fresh ids, so
+  re-importing duplicates rather than clobbers and an import can never overwrite
+  or delete what you already have. Endpoints are merged in by URL (existing ones
+  win); folder/tag organization is intentionally not carried across accounts (see
+  *Intentional limitations*). A backup file contains your endpoint API keys in
+  plain text — the UI says so — so store it somewhere safe.
+
 ---
 
 ## Architecture
@@ -546,19 +591,21 @@ isolation is best-effort, not a guarantee — see the
 - **Valkey** (Redis protocol) caches each user's full snapshot so repeat loads
   skip the database, and serves as Better Auth's secondary storage for hot session
   lookups. Cache failures degrade to a miss and fall back to Postgres.
-- **Accounts & auth** use **Better Auth** (`lib/auth.ts`) with email + password,
-  the Drizzle Postgres adapter for the user/session/account/verification tables,
-  and Valkey for session storage. The whole workbench sits behind `AuthGate`; all
-  app data is scoped to the signed-in user via a `user_id` foreign key. Sessions
-  last 30 days (refreshed daily) with a short cookie cache; set `ALLOW_SIGNUP=false`
-  to run a closed instance.
+- **Accounts & auth** use **Better Auth** (`lib/auth.ts`) with email + password
+  and optional OAuth (Google, registered only when its env vars are set), the
+  Drizzle Postgres adapter for the user/session/account/verification tables, and
+  Valkey for session storage. The whole workbench sits behind `AuthGate`; all app
+  data is scoped to the signed-in user via a `user_id` foreign key. Sessions last
+  30 days (refreshed daily) with a short cookie cache; set `ALLOW_SIGNUP=false` to
+  run a closed instance.
 - **Schema** is defined once in `lib/db/schema.ts`: the four Better Auth tables
   plus `conversations`, `messages` (relational, ordered by `seq`), `workspaces`,
   `workspace_files`, `workspace_runs`, `memories`, `skills`, `system_prompts`,
   `settings`, and `ui_state`. Flexible sub-structures (message meta, tool events,
-  endpoint lists, tool settings, run steps, UI layout) are stored as `jsonb` so the
-  TypeScript types in `lib/types.ts` stay the source of truth. Migrations live in
-  `drizzle/` and are managed with Drizzle Kit.
+  message attachments, endpoint lists, tool settings, run steps, the resumable
+  agent-run extras in `workspace_runs.meta`, UI layout) are stored as `jsonb` so
+  the TypeScript types in `lib/types.ts` stay the source of truth. Migrations live
+  in `drizzle/` and are managed with Drizzle Kit.
 - **Model access** goes through a catch-all proxy (`app/api/llama/[...path]/route.ts`).
   The browser only ever talks to Mimir; the Next server forwards to whatever
   endpoint you set (stripping a duplicate `/v1` for hosted providers and adding the
@@ -685,6 +732,19 @@ All variables are optional except `BETTER_AUTH_SECRET`. The bundled
 | `BETTER_AUTH_SECRET` | Signing secret for sessions. If unset, the entrypoint generates a strong random one and persists it to `.auth-secret` so sessions stay stable; set it explicitly (`openssl rand -base64 32`) to control it yourself. | _auto-generated_        |
 | `BETTER_AUTH_URL`    | Public base URL of the app (cookies, callbacks)                            | `http://localhost:3000` |
 | `ALLOW_SIGNUP`       | `false` disables new registrations (existing accounts can still sign in)   | `true`                  |
+| `GOOGLE_CLIENT_ID`     | OAuth 2.0 client ID for Google sign-in. Both Google vars must be set to enable the "Continue with Google" button. | _unset (disabled)_ |
+| `GOOGLE_CLIENT_SECRET` | OAuth 2.0 client secret for Google sign-in.                              | _unset (disabled)_ |
+
+> **Google sign-in (optional).** Create an OAuth 2.0 Client ID of type *Web
+> application* in the Google Cloud console (APIs & Services → Credentials), add
+> the redirect URI `<BETTER_AUTH_URL>/api/auth/callback/google` (e.g.
+> `http://localhost:3000/api/auth/callback/google`), and set the two variables
+> above. The sign-in screen probes `/api/auth-config` and only shows the Google
+> button when both are present, so a default install stays email/password-only.
+> Note that `ALLOW_SIGNUP` governs email/password registration only — a
+> configured OAuth provider can still create an account on first sign-in, so on a
+> locked-down instance also restrict access at the provider (the consent screen's
+> allowed users).
 
 ### Web search (SearXNG)
 
@@ -804,12 +864,13 @@ In Option A, migrations run automatically on container start
 
 ```
 app/
-  api/                 Route handlers (llama proxy, state, auth, websearch,
-                       webfetch, workspaces/exec, settings, conversations, …)
+  api/                 Route handlers (llama proxy, state, auth, auth-config,
+                       websearch, webfetch, extract (PDF text), workspaces/exec,
+                       settings, conversations, …)
   layout.tsx,page.tsx  Root layout and the single app page
 components/
   AppShell.tsx         The client-rendered workbench shell
-  AuthGate.tsx         Sign-in gate wrapping the app
+  AuthGate.tsx         Sign-in gate wrapping the app (email/password + Google)
   TabBar, Sidebar,     Chrome: tabs, sidebar, floating windows, search overlay
   FloatingWindow, …
   Markdown.tsx         GFM rendering + syntax highlighting
@@ -819,20 +880,25 @@ components/
                        Terminal, AgentPanel, PlanView, AgentSettings, …)
 lib/
   store.ts             Zustand optimistic store (the client's source of truth)
-  store-slices/        Per-domain store slices composed into store.ts
-                       (organizationSlice: folders, tags, item membership, pricing)
+  store-slices/        Per-domain store slices composed into store.ts:
+                       organizationSlice (folders, tags, membership, pricing),
+                       imageStudioSlice, transferSlice (import/restore), and
+                       workspaceRunSlice (agent-run streaming mutations)
   sync.ts              Debounced background persistence to /api/*
   types.ts             The data model (source of truth for the jsonb shapes)
   defaults.ts          Pure defaults + seed helpers (shared client/server)
   llama.ts             Streaming chat client + SSE/reasoning parsing
   models.ts            Endpoint/model resolution and pickers
   tools.ts             The tool registry + chat tool loop (+ shared tool helpers)
+  attachments.ts       File→text extraction + chat context injection (text + PDF)
+  transfer.ts          Export/import serialization (Markdown + JSON, backups)
+  clientFiles.ts       Browser download + file-picker helpers
   memory.ts            remember tool + memory injection prompt
   skills.ts            SKILL.md parser + load_skill tool + discovery prompt
   systemPrompts.ts     System-prompt presets + segment assembly
   contextManager.ts    Tool-output pruning + recursive summarization
   webtools.ts          web_search / web_fetch tools (+ global search throttle)
-  auth.ts, cache.ts    Better Auth config; Valkey client + state cache helpers
+  auth.ts, cache.ts    Better Auth config (+ social providers); Valkey client
   db/                  Drizzle schema + client
   server/              Server-only: session/auth, state read/write, sandbox
   workspace/           Pure FS, fs/exec/plan tools, the agent loop, the runner
@@ -859,6 +925,15 @@ These are known boundaries, not bugs. Several are tracked as roadmap items in
 - **Skill scripts don't auto-run in chat.** `load_skill` surfaces a skill's
   scripts but the chat tool loop won't execute them — you can run them yourself in
   a workspace, which has a real execution sandbox.
+- **Chat attachments are text-only context.** Text-like files and PDFs are
+  injected as extracted text; there's no image/multimodal input yet, and binary
+  formats that aren't text or PDF (images, archives, office docs) are rejected at
+  attach time. Scanned/image-only PDFs yield no text (no OCR).
+- **Imports are additive, not a faithful clone.** Importing a backup adds all
+  items as new rows but does **not** recreate folders, tags, or item membership
+  across accounts (those references are stripped), and it merges rather than
+  replaces settings. A true "mirror this account onto a fresh instance" restore
+  (preserving organization and remapping ids) is tracked in `TODO.md`.
 
 ---
 
@@ -866,10 +941,11 @@ These are known boundaries, not bugs. Several are tracked as roadmap items in
 
 Planned features, fixes, and refactors are tracked in **[`TODO.md`](TODO.md)** —
 including server-side run execution (so generation survives a tab close),
-per-conversation and per-request generation parameters, and more. (Several
-earlier limitations — a real interactive terminal, binary files in the
-workspace, web access for agents, richer sandbox toolchains, and uploading
-existing projects — are now implemented.)
+per-conversation and per-request generation parameters, image/multimodal
+attachment input, and a faithful account clone on import. (Several earlier
+limitations — a real interactive terminal, binary files in the workspace, web
+access for agents, richer sandbox toolchains, uploading existing projects, Google
+sign-in, file attachments, and export/import — are now implemented.)
 
 ---
 

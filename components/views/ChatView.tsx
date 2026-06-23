@@ -10,8 +10,13 @@ import {
   resolveModelKey,
   describeModelKey,
 } from "@/lib/models";
-import { Message, ResolvedModel, ToolEventRecord } from "@/lib/types";
+import { Attachment, Message, ResolvedModel, ToolEventRecord } from "@/lib/types";
 import { DEFAULT_CONTEXT_MANAGEMENT } from "@/lib/defaults";
+import {
+  MAX_ATTACHMENTS_PER_MESSAGE,
+  messageContentForModel,
+  readAttachment,
+} from "@/lib/attachments";
 import { rememberTool } from "@/lib/memory";
 import { loadSkillTool } from "@/lib/skills";
 import { buildSystemSegments, joinSegments } from "@/lib/systemPrompts";
@@ -214,7 +219,10 @@ export default function ChatView({ conversationId }: { conversationId: string })
             endpoint: resolved.url,
             apiKey: resolved.apiKey,
             model: resolved.modelId,
-            messages: history.map((m) => ({ role: m.role, content: m.content })),
+            messages: history.map((m) => ({
+              role: m.role,
+              content: messageContentForModel(m),
+            })),
             system,
             registry,
             context,
@@ -293,9 +301,12 @@ export default function ChatView({ conversationId }: { conversationId: string })
   );
 
   const send = useCallback(
-    async (text: string) => {
+    async (text: string, attachments?: Attachment[]) => {
       const trimmed = text.trim();
-      if (!trimmed || useMimir.getState().streamingConvs[conversationId])
+      const hasAttachments = !!attachments && attachments.length > 0;
+      // Allow sending with only attachments (no typed text).
+      if ((!trimmed && !hasAttachments) ||
+        useMimir.getState().streamingConvs[conversationId])
         return;
 
       const userMessage: Message = {
@@ -303,16 +314,23 @@ export default function ChatView({ conversationId }: { conversationId: string })
         role: "user",
         content: trimmed,
         createdAt: Date.now(),
+        attachments: hasAttachments ? attachments : undefined,
       };
 
       const before = useMimir.getState().conversations[conversationId];
       appendMessage(conversationId, userMessage);
 
       if (before && before.messages.length === 0) {
-        setConversationTitle(
-          conversationId,
-          trimmed.length > 42 ? trimmed.slice(0, 42) + "…" : trimmed
-        );
+        // Title from the typed text, or the first attachment's name if the
+        // message was attachment-only.
+        const basis =
+          trimmed || (hasAttachments ? attachments![0].name : "");
+        if (basis) {
+          setConversationTitle(
+            conversationId,
+            basis.length > 42 ? basis.slice(0, 42) + "…" : basis
+          );
+        }
       }
 
       await runCompletion([...(before?.messages ?? []), userMessage]);
@@ -623,6 +641,15 @@ const MessageRow = memo(
           )}
         </div>
 
+        {/* Attached files (user messages) — shown as read-only chips. */}
+        {isUser && !isEditing && message.attachments && message.attachments.length > 0 && (
+          <div className="flex max-w-[92%] flex-wrap justify-end gap-1.5 md:max-w-[88%]">
+            {message.attachments.map((a) => (
+              <AttachmentChip key={a.id} attachment={a} />
+            ))}
+          </div>
+        )}
+
         {/* Action Toolbar */}
         <div className={["flex items-center gap-1.5 px-1 text-xs text-parchment-600", isUser ? "flex-row-reverse" : ""].join(" ")}>
           {!isUser && !isEditing && <MetaLine meta={message.meta} modelKey={message.model} />}
@@ -764,7 +791,7 @@ function ChatInput({
                      onOpenTools,
                    }: {
   streaming: boolean;
-  onSend: (text: string) => void;
+  onSend: (text: string, attachments?: Attachment[]) => void;
   onStop: () => void;
   onResize: () => void;
   webToolsAvailable: boolean;
@@ -773,8 +800,15 @@ function ChatInput({
   onOpenTools: () => void;
 }) {
   const [value, setValue] = useState("");
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [reading, setReading] = useState(0); // count of files currently reading
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const lastHeight = useRef(0);
+  // Depth counter so nested dragenter/dragleave events don't flicker the overlay.
+  const dragDepth = useRef(0);
 
   useEffect(() => {
     const el = ref.current;
@@ -791,12 +825,74 @@ function ChatInput({
     }
   }, [value, onResize]);
 
+  // Reflect the attachment row growing/shrinking so the scroll view stays put.
+  useEffect(() => {
+    onResize();
+  }, [attachments.length, attachError, reading, onResize]);
+
+  const addFiles = useCallback(async (files: FileList | File[]) => {
+    const list = Array.from(files);
+    if (list.length === 0) return;
+    setAttachError(null);
+
+    const room = MAX_ATTACHMENTS_PER_MESSAGE - attachments.length;
+    if (room <= 0) {
+      setAttachError(
+        `You can attach at most ${MAX_ATTACHMENTS_PER_MESSAGE} files per message.`
+      );
+      return;
+    }
+    const toRead = list.slice(0, room);
+    if (toRead.length < list.length) {
+      setAttachError(
+        `Only the first ${room} of ${list.length} files were added (limit ${MAX_ATTACHMENTS_PER_MESSAGE} per message).`
+      );
+    }
+
+    setReading((n) => n + toRead.length);
+    for (const file of toRead) {
+      try {
+        const res = await readAttachment(file, uid);
+        if (res.ok) {
+          setAttachments((cur) => [...cur, res.attachment]);
+        } else {
+          setAttachError(res.error);
+        }
+      } catch (e) {
+        setAttachError((e as Error).message || `Could not read ${file.name}.`);
+      } finally {
+        setReading((n) => n - 1);
+      }
+    }
+  }, [attachments]);
+
+  function onPickFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    if (e.target.files) void addFiles(e.target.files);
+    // Reset so picking the same file again re-triggers change.
+    e.target.value = "";
+  }
+
+  function removeAttachment(id: string) {
+    setAttachments((cur) => cur.filter((a) => a.id !== id));
+  }
+
   function submit() {
     const text = value.trim();
-    if (!text || streaming) return;
-    onSend(text);
+    if ((!text && attachments.length === 0) || streaming || reading > 0) return;
+    onSend(text, attachments.length > 0 ? attachments : undefined);
     setValue("");
+    setAttachments([]);
+    setAttachError(null);
   }
+
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault();
+    dragDepth.current = 0;
+    setDragOver(false);
+    if (e.dataTransfer?.files?.length) void addFiles(e.dataTransfer.files);
+  }
+
+  const canSend = (!!value.trim() || attachments.length > 0) && reading === 0;
 
   return (
     <div className="px-3 pb-3 pt-1 pb-safe md:px-5 md:pb-5">
@@ -809,44 +905,157 @@ function ChatInput({
             onOpenTools={onOpenTools}
           />
         </div>
-        <div className="flex items-end gap-2 rounded-xl border border-ink-700 bg-ink-850 px-3 py-2 focus-within:border-bronze-600">
-          <textarea
-            ref={ref}
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-            rows={1}
-            placeholder="Message the model…"
-            className="max-h-72 min-h-[2.5rem] flex-1 resize-none overflow-hidden bg-transparent px-1 py-2 text-base leading-relaxed text-parchment-100 placeholder:text-parchment-600 focus:outline-none md:text-sm"
-          />
-          {streaming ? (
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          onChange={onPickFiles}
+          className="hidden"
+          aria-hidden
+        />
+
+        <div
+          className={[
+            "relative rounded-xl border bg-ink-850 px-3 py-2 transition-colors",
+            dragOver
+              ? "border-bronze-500 ring-1 ring-bronze-500/40"
+              : "border-ink-700 focus-within:border-bronze-600",
+          ].join(" ")}
+          onDragEnter={(e) => {
+            if (!e.dataTransfer?.types?.includes("Files")) return;
+            dragDepth.current += 1;
+            setDragOver(true);
+          }}
+          onDragOver={(e) => {
+            if (e.dataTransfer?.types?.includes("Files")) e.preventDefault();
+          }}
+          onDragLeave={() => {
+            dragDepth.current = Math.max(0, dragDepth.current - 1);
+            if (dragDepth.current === 0) setDragOver(false);
+          }}
+          onDrop={onDrop}
+        >
+          {(attachments.length > 0 || reading > 0) && (
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {attachments.map((a) => (
+                <AttachmentChip
+                  key={a.id}
+                  attachment={a}
+                  onRemove={() => removeAttachment(a.id)}
+                />
+              ))}
+              {reading > 0 && (
+                <span className="flex items-center gap-1.5 rounded-md border border-ink-700 bg-ink-900 px-2 py-1 text-xs text-parchment-400">
+                  <span className="h-3 w-3 animate-spin rounded-full border border-bronze-500 border-t-transparent" />
+                  Reading {reading} file{reading === 1 ? "" : "s"}…
+                </span>
+              )}
+            </div>
+          )}
+
+          <div className="flex items-end gap-2">
             <button
-              onClick={onStop}
-              className="mb-1 flex h-9 w-9 items-center justify-center rounded-lg bg-ink-700 text-parchment-100 transition-colors hover:bg-ink-800"
-              title="Stop generating"
-              aria-label="Stop generating"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={streaming}
+              className="mb-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-parchment-400 transition-colors hover:bg-ink-800 hover:text-parchment-100 disabled:opacity-30"
+              title="Attach files as context"
+              aria-label="Attach files"
             >
-              <Icons.IconStop />
+              <Icons.IconPaperclip className="h-4 w-4" />
             </button>
-          ) : (
-            <button
-              onClick={submit}
-              disabled={!value.trim()}
-              className="mb-1 flex h-9 w-9 items-center justify-center rounded-lg bg-bronze-500 text-ink-950 transition-colors hover:bg-bronze-400 disabled:opacity-30"
-              title="Send"
-              aria-label="Send"
-            >
-              <Icons.IconSend />
-            </button>
+            <textarea
+              ref={ref}
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+              rows={1}
+              placeholder="Message the model…  (attach files with the clip, or drop them here)"
+              className="max-h-72 min-h-[2.5rem] flex-1 resize-none overflow-hidden bg-transparent px-1 py-2 text-base leading-relaxed text-parchment-100 placeholder:text-parchment-600 focus:outline-none md:text-sm"
+            />
+            {streaming ? (
+              <button
+                onClick={onStop}
+                className="mb-1 flex h-9 w-9 items-center justify-center rounded-lg bg-ink-700 text-parchment-100 transition-colors hover:bg-ink-800"
+                title="Stop generating"
+                aria-label="Stop generating"
+              >
+                <Icons.IconStop />
+              </button>
+            ) : (
+              <button
+                onClick={submit}
+                disabled={!canSend}
+                className="mb-1 flex h-9 w-9 items-center justify-center rounded-lg bg-bronze-500 text-ink-950 transition-colors hover:bg-bronze-400 disabled:opacity-30"
+                title="Send"
+                aria-label="Send"
+              >
+                <Icons.IconSend />
+              </button>
+            )}
+          </div>
+
+          {dragOver && (
+            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-ink-950/70 text-sm font-medium text-bronze-300">
+              Drop files to attach as context
+            </div>
           )}
         </div>
+
+        {attachError && (
+          <p className="mt-1.5 px-1 text-xs text-signal-err" role="alert">
+            {attachError}
+          </p>
+        )}
       </div>
     </div>
+  );
+}
+
+/** A compact chip for a pending or sent attachment, with a remove control. */
+function AttachmentChip({
+  attachment,
+  onRemove,
+}: {
+  attachment: Attachment;
+  onRemove?: () => void;
+}) {
+  const meta =
+    attachment.kind === "pdf"
+      ? `PDF${
+          attachment.pages
+            ? ` · ${attachment.pages}p`
+            : ""
+        }`
+      : "text";
+  return (
+    <span
+      className="flex max-w-[16rem] items-center gap-1.5 rounded-md border border-ink-700 bg-ink-900 px-2 py-1 text-xs text-parchment-200"
+      title={`${attachment.name} (${meta}${
+        attachment.truncated ? ", truncated" : ""
+      })`}
+    >
+      <Icons.IconFile className="h-3.5 w-3.5 shrink-0 text-parchment-500" />
+      <span className="truncate font-mono">{attachment.name}</span>
+      <span className="shrink-0 text-[10px] uppercase tracking-wide text-parchment-600">
+        {meta}
+      </span>
+      {onRemove && (
+        <button
+          onClick={onRemove}
+          className="shrink-0 rounded text-parchment-500 transition-colors hover:text-parchment-100"
+          title={`Remove ${attachment.name}`}
+          aria-label={`Remove ${attachment.name}`}
+        >
+          <Icons.IconX className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </span>
   );
 }
 
