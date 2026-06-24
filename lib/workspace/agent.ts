@@ -155,6 +155,8 @@ export function buildAgentSystem(args: {
   toolNames: string[];
   persona?: import("../types").AgentPersonaKey;
   plan?: PlanItem[];
+  /** Skills discovery menu, if any skills are enabled (see lib/skills). */
+  skillsPrompt?: string;
 }): string {
   const { files, instructions, toolNames } = args;
   const canExecute = toolNames.includes("run_command");
@@ -179,6 +181,7 @@ export function buildAgentSystem(args: {
     toolNames,
     filesystem: filesystemBlock(files),
     planText,
+    skillsPrompt: args.skillsPrompt,
   });
 }
 
@@ -198,6 +201,11 @@ export interface AgentTurnParams {
   extraSystemPrompts?: string[];
   /** Which persona to use. */
   persona?: import("../types").AgentPersonaKey;
+  /**
+   * Skills discovery menu for this run (from lib/skills `buildSkillsPrompt`),
+   * captured at turn start like the other standing prompt segments.
+   */
+  skillsPrompt?: string;
   /** Tool registry (task_complete is added automatically). */
   registry: ToolRegistry;
   /** Reads the current files so the per-step system manifest stays fresh. */
@@ -259,6 +267,7 @@ export async function runAgentTurn(
     instructions,
     extraSystemPrompts,
     persona,
+    skillsPrompt,
     registry,
     getFiles,
     getPlan,
@@ -329,6 +338,7 @@ export async function runAgentTurn(
       toolNames,
       persona,
       plan: getPlan?.(),
+      skillsPrompt,
     });
 
     // Think-timing, mirroring the chat: measure time spent inside <think>.

@@ -640,6 +640,29 @@ export interface ModelPrice {
 export interface UsagePricing {
   /** Map of model key (or bare model id) → price. */
   models: Record<string, ModelPrice>;
+  /**
+   * Persistent per-model token ledger for the usage/cost view, keyed the same
+   * way as `models`. Unlike a tally derived from the current conversations and
+   * runs, this accumulates as responses are produced and SURVIVES deleting the
+   * conversation or workspace that produced them — so spend isn't lost when you
+   * clean up. Incremented once per finalized assistant message / agent step.
+   *
+   * Optional for back-compat: settings persisted before this field existed
+   * hydrate with it `undefined`, which triggers a one-time backfill from
+   * existing data (see the store's `seedUsageLedgerIfNeeded`). A seeded-but-empty
+   * ledger is `{}` (defined), so the backfill never runs twice.
+   */
+  ledger?: Record<string, ModelUsageTotals>;
+}
+
+/** Accumulated token usage for one model in the persistent usage ledger. */
+export interface ModelUsageTotals {
+  /** Summed prompt (input) tokens across every billed response. */
+  inputTokens: number;
+  /** Summed completion (output) tokens across every billed response. */
+  outputTokens: number;
+  /** Number of billed responses (assistant messages + agent steps). */
+  responses: number;
 }
 
 /** All tool configuration, surfaced in the Tools window. */

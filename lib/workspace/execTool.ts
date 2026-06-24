@@ -23,7 +23,7 @@ const RUN_COMMAND_DESCRIPTION =
   "\n" +
   "HOW to use it well:\n" +
   "- The command runs through `sh -c`, so pipes, redirects, `&&`, and quoting all work (e.g. `python main.py`, `pytest -q`, `ls -la`, `cat out.txt`).\n" +
-  "- Your files are already in /workspace — write them with write_file first, then run them here. Output files a command creates appear back in your filesystem automatically.\n" +
+  "- Your files are already in /workspace, which is the SAME place as your filesystem root: a file you wrote at `/main.py` is `/workspace/main.py` here. Run it as `python main.py` (the cwd is /workspace) or `python /workspace/main.py` — don't look for it under a nested `/workspace/workspace/`. Output files a command creates appear back in your filesystem automatically.\n" +
   "- Read the exit code and stderr. If a run fails, read the error, fix the file with edit_file, and run again.\n" +
   "- State persists between commands within a run (installed packages, created files), so you can `pip install` then use the package in a later command — but only if the sandbox has network access, which it may not.\n" +
   "- Long-running or interactive commands won't work: each command runs to completion under a time limit, with no interactive stdin. Don't start servers or REPLs that wait for input.\n" +

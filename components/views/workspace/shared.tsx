@@ -85,6 +85,18 @@ export function describeFsTool(event: ToolEventRecord): string {
       return typeof a.id === "string" && typeof a.status === "string"
         ? `marked a step ${a.status}`
         : "updated a step";
+    case "load_skill":
+      return typeof a.name === "string" && a.name
+        ? `loaded skill: ${clip(a.name, 40)}`
+        : "loaded a skill";
+    case "web_search":
+      return typeof a.query === "string" && a.query
+        ? `searched: ${clip(a.query, 50)}`
+        : "searched the web";
+    case "web_fetch":
+      return typeof a.url === "string" && a.url
+        ? `fetched ${clip(a.url, 50)}`
+        : "fetched a page";
     default:
       return "";
   }

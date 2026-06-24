@@ -35,9 +35,17 @@ export function buildSkillsPrompt(skills: Skill[]): string | null {
 /**
  * Builds the `load_skill` registry entry. `lookup` resolves a skill by name
  * (wired to the store in ChatView). The handler returns the full body, plus a
- * note about any scripts the skill defines — which cannot run yet.
+ * note about any scripts the skill defines.
+ *
+ * `opts.canRunScripts` distinguishes the two execution contexts: the chat tool
+ * loop has no executor, so script references are noted but can't be run; a
+ * workspace agent has a real Docker sandbox (run_command), so it's told it CAN
+ * run them. This is the load-vs-run boundary the README describes.
  */
-export function loadSkillTool(lookup: (name: string) => Skill | null): ToolHandler {
+export function loadSkillTool(
+  lookup: (name: string) => Skill | null,
+  opts: { canRunScripts?: boolean } = {}
+): ToolHandler {
   return {
     def: {
       type: "function",
@@ -70,9 +78,11 @@ export function loadSkillTool(lookup: (name: string) => Skill | null): ToolHandl
 
       let out = skill.body.trim();
       if (skill.scripts.length > 0) {
-        out +=
-          `\n\n---\nThis skill defines scripts: ${skill.scripts.join(", ")}. ` +
-          "Script execution is not available yet, so describe what you would run rather than attempting to run it.";
+        out += opts.canRunScripts
+          ? `\n\n---\nThis skill defines scripts: ${skill.scripts.join(", ")}. ` +
+            "You have a shell (run_command), so you can run them for real — write them to the filesystem if they aren't already present, then execute them and check the output."
+          : `\n\n---\nThis skill defines scripts: ${skill.scripts.join(", ")}. ` +
+            "Script execution is not available yet, so describe what you would run rather than attempting to run it.";
       }
       return out;
     },

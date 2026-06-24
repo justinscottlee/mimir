@@ -318,19 +318,45 @@ export const FILESYSTEM_TOOL_NAMES = [
   "move_path",
 ] as const;
 
+/** The argument keys a filesystem tool treats as paths. */
+const PATH_ARG_KEYS = ["path", "from", "to"] as const;
+
+/**
+ * Wrap a filesystem tool so any path-shaped argument has a redundant leading
+ * "/workspace" collapsed to the root before the handler runs (see
+ * `fs.stripWorkspaceRoot`). This is what keeps an agent that writes to
+ * "/workspace/app.py" — matching the shell cwd it was told about — from nesting
+ * a second `workspace/` folder and then being unable to find its own file.
+ * Empty/whitespace values are left untouched so the handlers' own
+ * "a 'path' is required" checks still fire.
+ */
+function withWorkspacePaths(handler: ToolHandler): ToolHandler {
+  return {
+    def: handler.def,
+    run: (args) => {
+      const fixed: Record<string, unknown> = { ...args };
+      for (const key of PATH_ARG_KEYS) {
+        const v = fixed[key];
+        if (typeof v === "string" && v.trim()) fixed[key] = fs.stripWorkspaceRoot(v);
+      }
+      return handler.run(fixed);
+    },
+  };
+}
+
 /** Builds the complete filesystem tool registry bound to a store-backed API. */
 export function buildFilesystemTools(
   api: WorkspaceFsApi,
   readCharCap: number = DEFAULT_TOOL_OUTPUT_LIMITS.readFileChars
 ): ToolRegistry {
   return {
-    list_files: listFilesTool(api),
-    read_file: readFileTool(api, readCharCap),
-    write_file: writeFileTool(api),
-    edit_file: editFileTool(api),
-    make_dir: makeDirTool(api),
-    delete_path: deletePathTool(api),
-    move_path: movePathTool(api),
+    list_files: withWorkspacePaths(listFilesTool(api)),
+    read_file: withWorkspacePaths(readFileTool(api, readCharCap)),
+    write_file: withWorkspacePaths(writeFileTool(api)),
+    edit_file: withWorkspacePaths(editFileTool(api)),
+    make_dir: withWorkspacePaths(makeDirTool(api)),
+    delete_path: withWorkspacePaths(deletePathTool(api)),
+    move_path: withWorkspacePaths(movePathTool(api)),
   };
 }
 

@@ -31,6 +31,30 @@ export function normalizePath(input: string): string {
   return "/" + segments.join("/");
 }
 
+/**
+ * Collapse a redundant leading "/workspace" from a model-supplied path.
+ *
+ * The virtual filesystem's root ("/") IS the sandbox's `/workspace` working
+ * directory: a file written at "/app.py" is `/workspace/app.py` inside the
+ * container. An agent that's told the shell cwd is `/workspace` will sometimes
+ * "helpfully" prefix its file paths to match — writing to "/workspace/app.py" —
+ * which then creates a real nested `workspace/` folder and lands the file at
+ * `/workspace/workspace/app.py` on disk. The agent can't find it again when it
+ * runs `python app.py` (or `python /workspace/app.py`) from the cwd, because
+ * those resolve to the *un-nested* `/workspace/app.py`.
+ *
+ * Treating a leading "/workspace" as equivalent to the root makes both spellings
+ * ("/app.py" and "/workspace/app.py") resolve to the same file, so the agent's
+ * two mental models can't drift apart. Only an exact leading "workspace" segment
+ * collapses — never "workspaces", and never a nested "/src/workspace".
+ */
+export function stripWorkspaceRoot(input: string): string {
+  const p = normalizePath(input);
+  if (p === "/workspace") return "/";
+  if (p.startsWith("/workspace/")) return "/" + p.slice("/workspace/".length);
+  return p;
+}
+
 /** The parent directory path of a node ("/" for top-level nodes and root). */
 export function parentPath(path: string): string {
   const p = normalizePath(path);

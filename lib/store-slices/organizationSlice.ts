@@ -1,6 +1,7 @@
 import { StateCreator } from "zustand";
 import type { MimirState } from "../store";
 import { uid } from "../defaults";
+import { bumpUsage, computeUsageLedger } from "../usage";
 import {
   Conversation,
   Folder,
@@ -43,6 +44,26 @@ export interface OrganizationSlice {
   // Usage / cost pricing (lives in settings.pricing).
   setModelPrice: (key: string, price: ModelPrice) => void;
   removeModelPrice: (key: string) => void;
+
+  // Usage / cost ledger (persistent per-model token totals, lives in
+  // settings.pricing.ledger).
+  /**
+   * Fold one finished response's tokens into a model's running total. Called
+   * once per finalized assistant message / agent step. Persists independently of
+   * the conversation that produced it, so deleting a chat doesn't erase its
+   * usage.
+   */
+  recordUsage: (key: string, inputTokens: number, outputTokens: number) => void;
+  /** Clear a single model's usage history (the per-row reset in the Usage view). */
+  resetModelUsage: (key: string) => void;
+  /** Clear every model's usage history. */
+  resetAllUsage: () => void;
+  /**
+   * One-time migration: if the ledger has never been initialized (settings
+   * predate it), backfill it from existing conversations and runs so historical
+   * usage isn't lost. A no-op once the ledger is defined.
+   */
+  seedUsageLedgerIfNeeded: () => void;
 }
 
 export const createOrganizationSlice: StateCreator<
@@ -282,6 +303,56 @@ export const createOrganizationSlice: StateCreator<
           ...s.settings,
           pricing: { ...s.settings.pricing, models },
         },
+      };
+    }),
+
+  // ---------- Usage / cost ledger ----------
+
+  recordUsage: (key, inputTokens, outputTokens) =>
+    set((s) => {
+      // No-op for unattributable or empty events so the table doesn't sprout an
+      // "unknown" row from a zero-token blip; real responses always have a key.
+      if (!key) return {};
+      const pricing = s.settings.pricing ?? { models: {} };
+      const ledger = bumpUsage(
+        pricing.ledger ?? {},
+        key,
+        inputTokens,
+        outputTokens
+      );
+      return {
+        settings: { ...s.settings, pricing: { ...pricing, ledger } },
+      };
+    }),
+
+  resetModelUsage: (key) =>
+    set((s) => {
+      const pricing = s.settings.pricing ?? { models: {} };
+      if (!pricing.ledger || !(key in pricing.ledger)) return {};
+      const ledger = { ...pricing.ledger };
+      delete ledger[key];
+      return {
+        settings: { ...s.settings, pricing: { ...pricing, ledger } },
+      };
+    }),
+
+  resetAllUsage: () =>
+    set((s) => {
+      const pricing = s.settings.pricing ?? { models: {} };
+      return {
+        settings: { ...s.settings, pricing: { ...pricing, ledger: {} } },
+      };
+    }),
+
+  seedUsageLedgerIfNeeded: () =>
+    set((s) => {
+      const pricing = s.settings.pricing ?? { models: {} };
+      // Already initialized (even if empty) → nothing to do, and crucially never
+      // re-derive, so going-forward increments aren't double-counted.
+      if (pricing.ledger !== undefined) return {};
+      const ledger = computeUsageLedger(s.conversations, s.workspaces);
+      return {
+        settings: { ...s.settings, pricing: { ...pricing, ledger } },
       };
     }),
 });

@@ -246,7 +246,9 @@ function mergeImportedSettings(
         s.settings.defaultWorkspaceModel ?? imported.defaultWorkspaceModel,
       defaultImageModel:
         s.settings.defaultImageModel ?? imported.defaultImageModel,
-      pricing: { models: mergedPricing },
+      // Merge prices, but keep the local usage ledger intact — importing
+      // someone's prices shouldn't wipe (or inherit) accumulated usage.
+      pricing: { ...s.settings.pricing, models: mergedPricing },
     },
   }));
 

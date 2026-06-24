@@ -90,15 +90,44 @@ export function ContextMenu({
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
     }
+
+    // Close on scroll, but ONLY when the user actually scrolled — not when the
+    // page scrolls itself. A model response streaming into the chat (or an agent
+    // transcript) programmatically auto-scrolls its container via scrollTo/
+    // scrollTop, which fires a capture-phase `scroll` on window and used to slam
+    // the menu shut mid-generation. Programmatic scrolls don't emit wheel/
+    // touchmove, so we gate the scroll-close behind a real user gesture: a
+    // wheel or touch-drag arms a brief window during which a `scroll` dismisses
+    // the menu; an auto-scroll with no preceding gesture is ignored.
+    let userScrolling = false;
+    let armTimer: ReturnType<typeof setTimeout> | null = null;
+    const armUserScroll = () => {
+      userScrolling = true;
+      if (armTimer) clearTimeout(armTimer);
+      armTimer = setTimeout(() => {
+        userScrolling = false;
+      }, 150);
+    };
+    function onScroll(e: Event) {
+      // A scroll inside the menu itself (a long menu) must never dismiss it.
+      if (ref.current?.contains(e.target as Node)) return;
+      if (userScrolling) onClose();
+    }
+
     document.addEventListener("pointerdown", onDocPointer);
     document.addEventListener("keydown", onKey);
+    window.addEventListener("wheel", armUserScroll, { capture: true, passive: true });
+    window.addEventListener("touchmove", armUserScroll, { capture: true, passive: true });
     window.addEventListener("resize", onClose);
-    window.addEventListener("scroll", onClose, true);
+    window.addEventListener("scroll", onScroll, true);
     return () => {
+      if (armTimer) clearTimeout(armTimer);
       document.removeEventListener("pointerdown", onDocPointer);
       document.removeEventListener("keydown", onKey);
+      window.removeEventListener("wheel", armUserScroll, { capture: true } as EventListenerOptions);
+      window.removeEventListener("touchmove", armUserScroll, { capture: true } as EventListenerOptions);
       window.removeEventListener("resize", onClose);
-      window.removeEventListener("scroll", onClose, true);
+      window.removeEventListener("scroll", onScroll, true);
     };
   }, [onClose]);
 

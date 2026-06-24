@@ -52,13 +52,14 @@ Work like a careful engineer, not an eager one:
 
 /** Filesystem-tool guidance, always relevant since the fs tools are always on. */
 const FILESYSTEM_BLOCK = `Filesystem tools:
+- Paths are rooted at "/", and that root IS the shell's working directory /workspace — a file you write at "/app.py" is "/workspace/app.py" when you run it. So write to "/app.py", NOT "/workspace/app.py": prefixing your paths with /workspace would nest a redundant folder and your files would not be where you expect them.
 - Use list_files to orient and read_file to see exact current contents before editing.
 - Use write_file for new files or full rewrites, and edit_file for a small, targeted change to an existing file (so you don't restate the whole thing).
 - Parent directories are created automatically when you write a file.`;
 
 /** Shell guidance — only included when run_command is available. */
 const SHELL_BLOCK = `Shell:
-- You have a real shell (run_command) in a Linux container; its working directory is /workspace, where your files live, and state persists between commands within a run.
+- You have a real shell (run_command) in a Linux container; its working directory is /workspace, which is the very same place as your filesystem root — your file "/app.py" is "/workspace/app.py" in the shell. Run it as \`python app.py\` (from the cwd) or \`python /workspace/app.py\`; do not create a second /workspace folder under it. State persists between commands within a run.
 - This is how you verify your work: after writing code, RUN it and check the output instead of assuming it works. If it errors, read the message, fix the file, and run again.`;
 
 /** Web guidance — only included when the web tools are available this run. */
@@ -154,6 +155,12 @@ export interface ComposeAgentSystemArgs {
   /** Pre-rendered plan block, if the run has a plan. */
   planText?: string;
   /**
+   * The skills discovery menu (from lib/skills `buildSkillsPrompt`), if any
+   * skills are enabled. Lets the agent load a skill's full body on demand via
+   * the load_skill tool — and, unlike chat, actually run its scripts.
+   */
+  skillsPrompt?: string;
+  /**
    * Enabled global system prompts (from the System Prompt window), folded in as
    * additional standing guidance.
    */
@@ -175,6 +182,13 @@ export function composeAgentSystem(args: ComposeAgentSystemArgs): string {
   if (args.canExecute) parts.push(SHELL_BLOCK);
   if (args.canWeb) parts.push(WEB_BLOCK);
   if (args.hasPlanning) parts.push(PLANNING_BLOCK);
+
+  // Skills discovery menu. Placed with the capability blocks because, like the
+  // shell and web tools, it's something the agent can reach for. The menu itself
+  // is built from the store by lib/skills `buildSkillsPrompt`.
+  if (args.skillsPrompt && args.skillsPrompt.trim()) {
+    parts.push(args.skillsPrompt.trim());
+  }
 
   parts.push(`Available tools: ${args.toolNames.join(", ")}.`);
 

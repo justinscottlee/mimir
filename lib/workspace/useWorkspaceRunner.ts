@@ -12,6 +12,7 @@ import {
 import { buildRunCommandTool } from "@/lib/workspace/execTool";
 import { buildPlanningTools, PlanApi } from "@/lib/workspace/planTool";
 import { webSearchTool, webFetchTool } from "@/lib/webtools";
+import { loadSkillTool, buildSkillsPrompt } from "@/lib/skills";
 import { runAgentTurn, reconstructWorkingHistory } from "@/lib/workspace/agent";
 import { workspaceScopedPromptTexts } from "@/lib/systemPrompts";
 import { makeContextRuntime } from "@/lib/contextManager";
@@ -62,6 +63,7 @@ export function useWorkspaceRunner(workspaceId: string): WorkspaceRunner {
   const setRunPlan = useMimir((s) => s.setRunPlan);
   const recordTurnOutcome = useMimir((s) => s.recordTurnOutcome);
   const setWorkspaceFiles = useMimir((s) => s.setWorkspaceFiles);
+  const recordUsage = useMimir((s) => s.recordUsage);
 
   /* ------------------------------ shared helpers ------------------------ */
 
@@ -168,6 +170,26 @@ export function useWorkspaceRunner(workspaceId: string): WorkspaceRunner {
         registry[h.def.function.name] = h;
       }
 
+      // Skills: the same progressive-disclosure mechanism as chat. The agent
+      // gets a one-line discovery menu in its system prompt and pulls a skill's
+      // full body on demand via load_skill. Unlike chat, a workspace HAS an
+      // executor (run_command), so the tool tells the agent it can actually run
+      // any scripts the skill defines. The menu is only injected when the tool is
+      // actually registered, so the prompt never advertises a missing tool.
+      let skillsPrompt: string | undefined;
+      if (toolCfg.builtins?.loadSkill) {
+        registry.load_skill = loadSkillTool(
+          (name) =>
+            Object.values(useMimir.getState().skills).find(
+              (sk) => sk.name === name
+            ) ?? null,
+          { canRunScripts: !!registry.run_command }
+        );
+        skillsPrompt =
+          buildSkillsPrompt(Object.values(useMimir.getState().skills)) ??
+          undefined;
+      }
+
       updateWorkspaceRun(workspaceId, runId, { status: "running" });
 
       const history = reconstructWorkingHistory(run).filter(
@@ -198,6 +220,28 @@ export function useWorkspaceRunner(workspaceId: string): WorkspaceRunner {
 
       const done = (async (): Promise<AgentRunStatus> => {
         try {
+          // The model key this run bills against (mirrors how the Usage view
+          // keys steps). Each finalized step is one billed request, so we add
+          // its tokens to the persistent usage ledger — which survives deleting
+          // the workspace, unlike a tally derived from live runs.
+          const usageKey = run.model ?? ws.model ?? "unknown";
+          const base = handlersFor(runId);
+          const handlers = {
+            ...base,
+            onStepFinalized: (
+              index: number,
+              content: string,
+              meta: import("@/lib/types").MessageMeta
+            ) => {
+              base.onStepFinalized(index, content, meta);
+              recordUsage(
+                usageKey,
+                meta.promptTokens ?? 0,
+                meta.completionTokens ?? 0
+              );
+            },
+          };
+
           const result = await runAgentTurn(
             {
               endpoint: resolved.url,
@@ -211,6 +255,7 @@ export function useWorkspaceRunner(workspaceId: string): WorkspaceRunner {
                 Object.values(useMimir.getState().systemPrompts)
               ),
               persona: cfg.persona,
+              skillsPrompt,
               registry,
               getFiles: fsApi.getFiles,
               getPlan: () => getRun(runId)?.plan ?? [],
@@ -220,7 +265,7 @@ export function useWorkspaceRunner(workspaceId: string): WorkspaceRunner {
               context,
               signal: controller.signal,
             },
-            handlersFor(runId),
+            handlers,
             startStepIndex
           );
 
@@ -272,6 +317,7 @@ export function useWorkspaceRunner(workspaceId: string): WorkspaceRunner {
       handlersFor,
       getRun,
       recordTurnOutcome,
+      recordUsage,
     ]
   );
 

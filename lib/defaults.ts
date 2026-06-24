@@ -130,7 +130,9 @@ export const DEFAULT_CONTEXT_MANAGEMENT: ContextManagementSettings = {
 
 /** Default, empty pricing table. Costs are always shown in US dollars. */
 export function defaultPricing(): UsagePricing {
-  return { models: {} };
+  // A defined (empty) ledger marks a fresh account as already seeded, so the
+  // one-time backfill in the store only fires for settings that predate it.
+  return { models: {}, ledger: {} };
 }
 
 /** The settings a brand-new user starts with. `username` defaults from email. */

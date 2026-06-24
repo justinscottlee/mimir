@@ -265,6 +265,11 @@ export const useMimir = create<MimirState>()((set, get, store) => ({
         return;
       }
       get().hydrate(snapshot);
+      // One-time migration for accounts whose settings predate the persistent
+      // usage ledger: backfill it from existing data so the Usage view doesn't
+      // start empty. Runs outside hydrate's suspendSync so the seeded ledger is
+      // persisted, and is a no-op once the ledger is defined.
+      get().seedUsageLedgerIfNeeded();
     } catch {
       set({ status: "error" });
     }

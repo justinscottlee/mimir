@@ -27,59 +27,32 @@ interface ModelUsage {
 }
 
 export default function UsageView() {
-  const conversations = useMimir((s) => s.conversations);
-  const workspaces = useMimir((s) => s.workspaces);
   const settings = useMimir((s) => s.settings);
   const pricing = settings.pricing;
 
   const setModelPrice = useMimir((s) => s.setModelPrice);
   const removeModelPrice = useMimir((s) => s.removeModelPrice);
+  const resetModelUsage = useMimir((s) => s.resetModelUsage);
+  const resetAllUsage = useMimir((s) => s.resetAllUsage);
 
-  // Aggregate token usage by model key. Each assistant message and each agent
-  // step is one billed request: its prompt tokens are input, completion tokens
-  // are output. Summing prompt tokens across requests matches how hosted APIs
-  // bill (every request re-sends and is charged for its context).
+  // The persistent per-model ledger is the source of truth: it's incremented as
+  // responses finish and keeps counting after the conversation or workspace that
+  // produced them is deleted. (Earlier this was derived live from conversations
+  // + runs, which made deleting a chat erase its usage.)
   const usage = useMemo<ModelUsage[]>(() => {
-    const map = new Map<string, ModelUsage>();
-    const bump = (key: string, inTok: number, outTok: number) => {
-      const u =
-        map.get(key) ??
-        (() => {
-          const fresh: ModelUsage = {
-            key,
-            inputTokens: 0,
-            outputTokens: 0,
-            responses: 0,
-          };
-          map.set(key, fresh);
-          return fresh;
-        })();
-      u.inputTokens += inTok;
-      u.outputTokens += outTok;
-      u.responses += 1;
-    };
-
-    for (const c of Object.values(conversations)) {
-      for (const m of c.messages) {
-        if (m.role !== "assistant" || !m.meta) continue;
-        const key = m.model ?? c.model ?? "unknown";
-        bump(key, m.meta.promptTokens ?? 0, m.meta.completionTokens ?? 0);
-      }
-    }
-    for (const w of Object.values(workspaces)) {
-      for (const run of w.runs) {
-        for (const step of run.steps) {
-          if (!step.meta) continue;
-          const key = run.model ?? w.model ?? "unknown";
-          bump(key, step.meta.promptTokens ?? 0, step.meta.completionTokens ?? 0);
-        }
-      }
-    }
-    return [...map.values()].sort(
-      (a, b) =>
-        b.inputTokens + b.outputTokens - (a.inputTokens + a.outputTokens)
-    );
-  }, [conversations, workspaces]);
+    const ledger = pricing.ledger ?? {};
+    return Object.entries(ledger)
+      .map(([key, u]) => ({
+        key,
+        inputTokens: u.inputTokens,
+        outputTokens: u.outputTokens,
+        responses: u.responses,
+      }))
+      .sort(
+        (a, b) =>
+          b.inputTokens + b.outputTokens - (a.inputTokens + a.outputTokens)
+      );
+  }, [pricing.ledger]);
 
   /** Resolve a model's price: exact key first, then bare model id. */
   function priceFor(key: string): ModelPrice | undefined {
@@ -121,10 +94,12 @@ export default function UsageView() {
   return (
     <div className="flex flex-col gap-5 p-5">
       <p className="max-w-2xl text-sm leading-relaxed text-parchment-400">
-        Token usage across every conversation and agent run, grouped by model.
-        Give a model an input/output rate below and Mimir estimates what it cost;
-        leave local models unpriced. Figures are estimates from the token counts
-        each endpoint reported.
+        Token usage across every model, accumulated as responses finish.
+        Totals persist even after you delete the conversation or workspace that
+        produced them; reset a model below to clear its history. Give a model an
+        input/output rate and Mimir estimates what it cost; leave local models
+        unpriced. Figures are estimates from the token counts each endpoint
+        reported.
       </p>
 
       {/* Totals */}
@@ -141,8 +116,11 @@ export default function UsageView() {
 
       {/* Per-model table */}
       <div>
-        <div className="mb-2 font-mono text-xs uppercase tracking-[0.2em] text-parchment-600">
-          By model
+        <div className="mb-2 flex items-center justify-between">
+          <div className="font-mono text-xs uppercase tracking-[0.2em] text-parchment-600">
+            By model
+          </div>
+          {usage.length > 0 && <ResetAllUsage onResetAll={resetAllUsage} />}
         </div>
         {usage.length === 0 ? (
           <div className="rounded-lg border border-dashed border-ink-700 p-8 text-center text-sm text-parchment-600">
@@ -161,6 +139,7 @@ export default function UsageView() {
                     Price /Mtok (in / out)
                   </th>
                   <th className="px-3 py-2 text-right font-normal">Cost</th>
+                  <th className="w-8 px-2 py-2 font-normal" aria-label="Actions" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink-700">
@@ -174,6 +153,7 @@ export default function UsageView() {
                     currency={cur}
                     onSetPrice={(p) => setModelPrice(u.key, p)}
                     onClearPrice={() => removeModelPrice(u.key)}
+                    onResetUsage={() => resetModelUsage(u.key)}
                   />
                 ))}
               </tbody>
@@ -195,6 +175,7 @@ function ModelRow({
   currency,
   onSetPrice,
   onClearPrice,
+  onResetUsage,
 }: {
   usage: ModelUsage;
   label: string;
@@ -203,8 +184,10 @@ function ModelRow({
   currency: string;
   onSetPrice: (p: ModelPrice) => void;
   onClearPrice: () => void;
+  onResetUsage: () => void;
 }) {
   const [editing, setEditing] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
   const [inStr, setInStr] = useState(String(price?.inputPerMTok ?? ""));
   const [outStr, setOutStr] = useState(String(price?.outputPerMTok ?? ""));
 
@@ -296,7 +279,80 @@ function ModelRow({
           </span>
         )}
       </td>
+      <td className="px-2 py-2 text-right">
+        {confirmReset ? (
+          <span className="flex items-center justify-end gap-1">
+            <button
+              onClick={() => {
+                onResetUsage();
+                setConfirmReset(false);
+              }}
+              className="rounded p-0.5 text-signal-err hover:bg-signal-err/20"
+              title="Clear this model's usage history — can't be undone"
+              aria-label="Confirm reset usage"
+            >
+              <Icons.IconCheck className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => setConfirmReset(false)}
+              className="rounded p-0.5 text-parchment-400 hover:bg-ink-700 hover:text-parchment-100"
+              title="Cancel"
+              aria-label="Cancel reset"
+            >
+              <Icons.IconClose className="h-4 w-4" />
+            </button>
+          </span>
+        ) : (
+          <button
+            onClick={() => setConfirmReset(true)}
+            className="rounded p-0.5 text-parchment-600 hover:text-signal-err"
+            title="Reset this model's usage history"
+            aria-label="Reset usage history"
+          >
+            <Icons.IconTrash className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </td>
     </tr>
+  );
+}
+
+/** A small "Reset all" button with an inline confirm, above the usage table. */
+function ResetAllUsage({ onResetAll }: { onResetAll: () => void }) {
+  const [confirming, setConfirming] = useState(false);
+  if (confirming) {
+    return (
+      <span className="flex items-center gap-2 text-xs text-signal-err">
+        Reset all usage?
+        <button
+          onClick={() => {
+            onResetAll();
+            setConfirming(false);
+          }}
+          className="rounded p-0.5 text-signal-err hover:bg-signal-err/20"
+          title="Clear all usage history — can't be undone"
+          aria-label="Confirm reset all usage"
+        >
+          <Icons.IconCheck className="h-4 w-4" />
+        </button>
+        <button
+          onClick={() => setConfirming(false)}
+          className="rounded p-0.5 text-parchment-400 hover:bg-ink-700 hover:text-parchment-100"
+          title="Cancel"
+          aria-label="Cancel reset all"
+        >
+          <Icons.IconClose className="h-4 w-4" />
+        </button>
+      </span>
+    );
+  }
+  return (
+    <button
+      onClick={() => setConfirming(true)}
+      className="rounded border border-ink-700 px-2 py-0.5 text-[11px] text-parchment-500 hover:bg-ink-800 hover:text-parchment-100"
+    >
+      Reset all
+    </button>
   );
 }
 

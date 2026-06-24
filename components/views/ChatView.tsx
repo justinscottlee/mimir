@@ -274,6 +274,16 @@ export default function ChatView({ conversationId }: { conversationId: string })
             thinkingMs: thinkingMs || undefined,
           },
         });
+
+        // Fold this completed generation into the persistent usage ledger (one
+        // billed response). Keyed the same way the Usage view keys this message,
+        // so it survives the conversation being deleted. Only the success path
+        // records — an interrupted generation has no token counts.
+        useMimir.getState().recordUsage(
+          current?.model ?? "unknown",
+          result.meta.promptTokens ?? 0,
+          result.meta.completionTokens ?? 0
+        );
       } catch (e) {
         if ((e as Error).name === "AbortError") {
           interrupted = true;
